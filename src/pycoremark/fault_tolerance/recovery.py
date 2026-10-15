@@ -1,0 +1,50 @@
+"""Task recovery manager for orphan tasks running on crashed nodes.
+
+TODO(Member 5): Implement state checkpoint reconciliation and partial progress recovery.
+"""
+
+from typing import List
+from pycoremark.common.logging import get_logger
+from pycoremark.models.task import Task, TaskStatus
+
+logger = get_logger("fault_tolerance.recovery")
+
+
+class RecoveryManager:
+    """Detects tasks stranded on crashed worker nodes and queues them for rescheduling."""
+
+    def __init__(self) -> None:
+        pass
+
+    def identify_orphaned_tasks(
+        self,
+        active_tasks: List[Task],
+        failed_node_ids: List[str],
+    ) -> List[Task]:
+        """Filter tasks that were assigned to failed nodes and need re-dispatch.
+
+        Args:
+            active_tasks: Full set of in-flight cluster tasks.
+            failed_node_ids: Identifiers of nodes confirmed dead or suspected.
+
+        Returns:
+            List of orphan tasks to be rescheduled.
+        """
+        # TODO(Member 5): Emit task reassignment events and reset assigned_node_id
+        orphaned: List[Task] = []
+        for task in active_tasks:
+            if (
+                task.status in (TaskStatus.RUNNING, TaskStatus.SCHEDULED)
+                and task.assigned_node_id in failed_node_ids
+            ):
+                logger.warning(
+                    "Task %s orphaned due to dead node %s. Marking for recovery.",
+                    task.task_id,
+                    task.assigned_node_id,
+                )
+                task.status = TaskStatus.PENDING
+                task.assigned_node_id = None
+                orphaned.append(task)
+
+        return orphaned
+

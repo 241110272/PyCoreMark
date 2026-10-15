@@ -1,0 +1,61 @@
+services:
+  coordinator:
+    build: .
+    command: ["pycoremark-coordinator"]
+    environment:
+      - PYCOREMARK_COORDINATOR_HOST=0.0.0.0
+      - PYCOREMARK_COORDINATOR_PORT=8000
+      - PYCOREMARK_LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    networks:
+      - cluster-net
+
+  worker-1:
+    build: .
+    command: ["pycoremark-worker"]
+    environment:
+      - PYCOREMARK_WORKER_ID=worker-1
+      - PYCOREMARK_COORDINATOR_HOST=coordinator
+      - PYCOREMARK_COORDINATOR_PORT=8000
+      - PYCOREMARK_WORKER_CORES=2
+      - PYCOREMARK_WORKER_MEMORY_MB=2048
+      - PYCOREMARK_LOG_LEVEL=INFO
+    depends_on:
+      - coordinator
+    networks:
+      - cluster-net
+
+  worker-2:
+    build: .
+    command: ["pycoremark-worker"]
+    environment:
+      - PYCOREMARK_WORKER_ID=worker-2
+      - PYCOREMARK_COORDINATOR_HOST=coordinator
+      - PYCOREMARK_COORDINATOR_PORT=8000
+      - PYCOREMARK_WORKER_CORES=2
+      - PYCOREMARK_WORKER_MEMORY_MB=2048
+      - PYCOREMARK_LOG_LEVEL=INFO
+    depends_on:
+      - coordinator
+    networks:
+      - cluster-net
+
+  dashboard:
+    build: .
+    command: ["pycoremark-dashboard"]
+    environment:
+      - PYCOREMARK_COORDINATOR_HOST=coordinator
+      - PYCOREMARK_COORDINATOR_PORT=8000
+      - PYCOREMARK_LOG_LEVEL=INFO
+    ports:
+      - "8080:8080"
+    depends_on:
+      - coordinator
+    networks:
+      - cluster-net
+
+networks:
+  cluster-net:
+    driver: bridge
+

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pycoremark"
+version = "0.1.0"
+description = "PyCoreMark: A virtual cluster benchmarking and simulation framework for Distributed Systems"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "PyCoreMark Distributed Systems Team" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: System :: Distributed Computing",
+    "Topic :: System :: Benchmark",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+pycoremark-coordinator = "pycoremark.cli.coordinator:main"
+pycoremark-worker = "pycoremark.cli.worker:main"
+pycoremark-dashboard = "pycoremark.cli.dashboard:main"
+pycoremark-run-dummy = "pycoremark.cli.experiment:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
