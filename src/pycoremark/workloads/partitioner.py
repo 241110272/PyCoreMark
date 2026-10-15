@@ -1,49 +1,29 @@
-"""Data partitioner utility for dividing benchmark datasets.
-
-TODO(Member 3): Add hash-partitioning, range-partitioning, and skew-simulation partitioning.
-"""
+"""Dataset partitioning owned by Filbert Matthew (Anggota 2)."""
 
 from typing import Any, List, Sequence
 
 
 class DataPartitioner:
-    """Partitions collections of data into disjoint chunks for distributed execution."""
+    """Split records into disjoint, contiguous, balanced half-open ranges."""
 
     @staticmethod
     def partition_range(total_records: int, partitions: int) -> List[tuple[int, int]]:
-        """Divide a range [0, total_records) into equal segment boundaries.
-
-        Args:
-            total_records: Total count of items to slice.
-            partitions: Number of buckets.
-
-        Returns:
-            List of (start_idx, end_idx) tuples.
-        """
-        # TODO(Member 3): Handle uneven partitions and residual remainder offsets
+        """Keep all records; partition sizes differ by at most one, including empties."""
+        if total_records < 0:
+            raise ValueError("total_records must be >= 0")
         if partitions <= 0:
-            raise ValueError("Partitions must be > 0")
-        chunk_size = total_records // partitions
+            raise ValueError("partitions must be > 0")
+        size, remainder = divmod(total_records, partitions)
         ranges = []
         start = 0
-        for i in range(partitions):
-            end = total_records if i == partitions - 1 else start + chunk_size
+        for index in range(partitions):
+            end = start + size + (index < remainder)
             ranges.append((start, end))
             start = end
         return ranges
 
     @staticmethod
     def partition_items(items: Sequence[Any], partitions: int) -> List[List[Any]]:
-        """Divide item sequence across partitions.
-
-        Args:
-            items: Source sequence of items.
-            partitions: Target partition count.
-
-        Returns:
-            List of chunked item lists.
-        """
-        # TODO(Member 3): Implement round-robin and key-based hashing partitioners
-        ranges = DataPartitioner.partition_range(len(items), partitions)
-        return [list(items[start:end]) for start, end in ranges]
-
+        """Preserve input order without dropping remainder records."""
+        return [list(items[start:end]) for start, end in
+                DataPartitioner.partition_range(len(items), partitions)]

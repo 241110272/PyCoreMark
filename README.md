@@ -27,12 +27,59 @@ Setiap anggota kelompok bertanggung jawab atas modul tertentu dengan penanda kom
 | Anggota | Area Tanggung Jawab | Modul Terkait | Komponen Kunci |
 |---|---|---|---|
 | **Member 1** | **Core Infrastructure & Cluster Membership** | `common/`, `cluster/` | `NodeRegistry`, `NodeRegistrationService`, `HeartbeatService`, `FailureDetector`, `ClusterManager` |
-| **Member 2** | **Communication & Coordination** | `communication/` | `MessageBroker`, `RPCClient`, `RPCServer`, `EventPublisher`, `EventConsumer`, `LamportClock` |
-| **Member 3** | **Distributed Workloads & Partitioning** | `workloads/` | `BaseWorkload`, `CPUWorkload`, `PartitionedDataWorkload`, `MixedWorkload`, `WorkloadRegistry`, `DataPartitioner` |
-| **Member 4** | **Scheduling & Load Balancing** | `scheduling/` | `BaseScheduler`, `StaticScheduler` (Round-Robin), `DynamicScheduler` (Least-Loaded), `ResourceAwareScheduler` |
+| **Member 2 — Filbert Matthew** | **Distributed Workloads & Partitioning** | `workloads/` | `BaseWorkload`, `CPUWorkload`, `PartitionedDataWorkload`, `MixedWorkload`, `WorkloadRegistry`, `DataPartitioner` |
+| **Member 3** | **Scheduling & Load Balancing** | `scheduling/` | `BaseScheduler`, `StaticScheduler` (Round-Robin), `DynamicScheduler` (Least-Loaded), `ResourceAwareScheduler` |
+| **Member 4** | **Communication & Coordination** | `communication/` | `MessageBroker`, `RPCClient`, `RPCServer`, `EventPublisher`, `EventConsumer`, `LamportClock` |
 | **Member 5** | **Fault Tolerance & Reliability** | `fault_tolerance/` | `FailureSimulator`, `RetryManager`, `RecoveryManager`, `IdempotencyStore`, `DeadLetterQueue` |
 | **Member 6** | **Monitoring, Tracing & Performance Analysis** | `monitoring/`, `analysis/` | `NodeMetricsCollector`, `ClusterMetricsCollector`, `TraceManager`, `PerformanceAnalyzer`, `OverheadCalculator` |
 | **Member 7** | **Coordinator, Worker Runtime, Storage & Reporting**| `coordinator/`, `worker/`, `storage/`, `dashboard/`, `reporting/` | `CoordinatorService`, `WorkerService`, `TaskExecutor`, `ExperimentRepository`, `DashboardService`, `ReportGenerator` |
+
+### Implementasi Anggota 2 — Filbert Matthew
+
+Tiga workload di `src/pycoremark/workloads/` sudah menjalankan operasi nyata, bukan hasil dummy. Tidak ada dependency tambahan di luar Python standard library.
+
+| Fitur | Implementasi | Konfigurasi |
+|---|---|---|
+| CPU-bound | Menghitung jumlah dan penjumlahan bilangan prima pada rentang `[start, stop)` | `total_tasks` menentukan jumlah task; `parameters.start` default 0; `parameters.stop` default `start + total_tasks * task_complexity` |
+| Dataset / MapReduce | Word count Unicode, case-insensitive, per record; penggabungan hasil parsial | `partitions` menentukan jumlah task; `parameters.records` berupa list string atau `parameters.dataset_path` berupa file UTF-8, satu record per baris |
+| Mixed workload | Membaca rentang baris file, normalisasi teks, SHA-256 berulang, menulis JSONL lokal, HTTP POST ringkasan | Wajib `parameters.dataset_path`, `parameters.output_dir`, dan `parameters.result_url`; `task_complexity` = jumlah putaran hash; `partitions` = jumlah task; timeout jaringan default 10 detik |
+
+Tanpa dataset eksplisit, workload data menghasilkan record deterministik `record <index> pycoremark` sebanyak `dataset_size_records`. Jika path dan records sama-sama diberikan, file diprioritaskan. Pembagian menyertakan sisa record, tidak overlap, dan selisih ukuran partisi maksimal satu. Partisi kosong tetap menghasilkan hasil valid.
+
+Contoh pemakaian untuk coordinator dan worker:
+
+```python
+from pycoremark.models.workload import WorkloadConfig, WorkloadType
+from pycoremark.workloads import CPUWorkload, WorkloadRegistry
+
+config = WorkloadConfig(
+    name="cpu_benchmark",
+    workload_type=WorkloadType.CPU_BOUND,
+    total_tasks=4,
+    parameters={"start": 0, "stop": 1000},
+)
+registry = WorkloadRegistry()
+registry.register(config.name, CPUWorkload)
+workload = registry.create(config)
+tasks = workload.generate_tasks()  # coordinator: kirim setiap Task lewat transport tim
+partials = [workload.execute_task(task) for task in tasks]  # contoh lokal, bukan cluster
+result = workload.aggregate_results(partials)
+assert result == {"prime_count": 168, "prime_sum": 76127, "processed_numbers": 1000}
+```
+
+`PartitionedDataWorkload.aggregate_results()` menggabungkan `processed_records` dan `word_counts`. Untuk baseline sequential, jalankan input identik dengan satu task CPU atau satu partisi data, lalu bandingkan hasil agregat. Reducer tidak melakukan deduplikasi: coordinator harus meneruskan hasil unik yang telah diterima. Setiap pemanggilan `generate_tasks()` membuat namespace ID baru; retry harus memakai Task yang sama.
+
+**Kontrak mixed workload:** `dataset_path` harus menunjuk file UTF-8 yang sama dan tidak berubah pada semua worker, misalnya melalui bind mount dengan path container identik. `output_dir` adalah penyimpanan lokal worker. Endpoint `result_url` harus dapat menerima HTTP POST JSON dan mengembalikan status 2xx setelah menerima hasil. Body berisi `task_id`, `processed_records`, `checksum` SHA-256 file JSONL, `output_path`, dan `output_bytes`. Path keluaran bukan URL unduhan. Error file, timeout, atau HTTP gagal diteruskan kepada caller; tidak ada simulasi sukses maupun retry internal. Pengiriman ulang dapat terjadi saat retry; deduplikasi endpoint tetap tanggung jawab bagian fault tolerance. Input path dan URL hanya untuk konfigurasi cluster tepercaya, bukan input publik tanpa pembatasan.
+
+**Batas integrasi:** runtime `worker/executor.py` masih mengembalikan hasil dummy dan belum memanggil kernel workload. Anggota runtime perlu menghubungkan `execute_task(task)` ke `TaskResult.output_data`; anggota komunikasi tetap menangani gRPC dan Redis Streams. Implementasi anggota 2 tidak mengubah modul tersebut. HTTP pada mixed workload adalah operasi network I/O benchmark, bukan pengganti transport cluster. Hasil mixed menyimpan checksum per partisi; validasi end-to-end dan laporan tetap bagian anggota 7.
+
+Verifikasi bagian ini:
+
+```bash
+python -m pytest tests/test_workloads.py -v
+```
+
+Smoke scenario telah menjalankan CPU dan word count melalui dua proses worker terpisah, serta mixed workload melalui dua proses dengan file sementara dan HTTP server lokal sungguhan. Ini membuktikan kernel lintas proses dan network I/O lokal, bukan deployment Docker/gRPC/Redis.
 
 ---
 
