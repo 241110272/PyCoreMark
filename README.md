@@ -28,7 +28,7 @@ Setiap anggota kelompok bertanggung jawab atas modul tertentu dengan penanda kom
 |---|---|---|---|
 | **Member 1** | **Core Infrastructure & Cluster Membership** | `common/`, `cluster/` | `NodeRegistry`, `NodeRegistrationService`, `HeartbeatService`, `FailureDetector`, `ClusterManager` |
 | **Member 2 — Filbert Matthew** | **Distributed Workloads & Partitioning** | `workloads/` | `BaseWorkload`, `CPUWorkload`, `PartitionedDataWorkload`, `MixedWorkload`, `WorkloadRegistry`, `DataPartitioner` |
-| **Member 3** | **Scheduling & Load Balancing** | `scheduling/` | `BaseScheduler`, `StaticScheduler` (Round-Robin), `DynamicScheduler` (Least-Loaded), `ResourceAwareScheduler` |
+| **Member 3 - Evan Adhyaksa Baskara** | **Scheduling & Load Balancing** | `scheduling/` | `BaseScheduler`, `StaticScheduler` (Round-Robin), `DynamicScheduler` (Least-Loaded), `ResourceAwareScheduler` |
 | **Member 4** | **Communication & Coordination** | `communication/` | `MessageBroker`, `RPCClient`, `RPCServer`, `EventPublisher`, `EventConsumer`, `LamportClock` |
 | **Member 5** | **Fault Tolerance & Reliability** | `fault_tolerance/` | `FailureSimulator`, `RetryManager`, `RecoveryManager`, `IdempotencyStore`, `DeadLetterQueue` |
 | **Member 6** | **Monitoring, Tracing & Performance Analysis** | `monitoring/`, `analysis/` | `NodeMetricsCollector`, `ClusterMetricsCollector`, `TraceManager`, `PerformanceAnalyzer`, `OverheadCalculator` |
