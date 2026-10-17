@@ -1,43 +1,23 @@
-"""Static deterministic scheduler (Round-Robin).
+"""Static task placement using Round-Robin."""
 
-TODO(Member 4): Implement consistent hashing and weighted static partitioning.
-"""
+from typing import List, Optional
 
-from typing import List
 from pycoremark.models.node import NodeInfo
 from pycoremark.models.task import Task
-from pycoremark.scheduling.base import BaseScheduler, SchedulingDecision
+from pycoremark.scheduling.base import BaseScheduler
 
 
 class StaticScheduler(BaseScheduler):
-    """Assigns tasks to nodes using deterministic Round-Robin strategy."""
+    def __init__(self, queue_capacity: int = 100, metrics_max_age_seconds: float = 30.0) -> None:
+        super().__init__(queue_capacity, metrics_max_age_seconds)
+        self._last_node_id: Optional[str] = None
 
-    def __init__(self) -> None:
-        self._index = 0
-
-    def schedule(
-        self,
-        task: Task,
-        available_nodes: List[NodeInfo],
-    ) -> SchedulingDecision:
-        """Schedule single task using round-robin index."""
-        # TODO(Member 4): Validate node state and handle empty node lists
-        if not available_nodes:
-            return SchedulingDecision(task_id=task.task_id, target_node_id=None, reason="No nodes available")
-
-        target = available_nodes[self._index % len(available_nodes)]
-        self._index += 1
-        return SchedulingDecision(
-            task_id=task.task_id,
-            target_node_id=target.node_id,
-            reason="Static round-robin allocation",
-        )
-
-    def schedule_batch(
-        self,
-        tasks: List[Task],
-        available_nodes: List[NodeInfo],
-    ) -> List[SchedulingDecision]:
-        """Schedule task batch round-robin."""
-        return [self.schedule(t, available_nodes) for t in tasks]
-
+    def _select_node(self, task: Task, candidates: List[NodeInfo]) -> Optional[NodeInfo]:
+        """Choose the next eligible node, independent of load scores."""
+        if not candidates:
+            return None
+        ids = [node.node_id for node in candidates]
+        start = (ids.index(self._last_node_id) + 1) % len(ids) if self._last_node_id in ids else 0
+        target = candidates[start]
+        self._last_node_id = target.node_id
+        return target
