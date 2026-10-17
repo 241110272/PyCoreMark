@@ -30,7 +30,7 @@ Setiap anggota kelompok bertanggung jawab atas modul tertentu dengan penanda kom
 | **Member 2 — Filbert Matthew** | **Distributed Workloads & Partitioning** | `workloads/` | `BaseWorkload`, `CPUWorkload`, `PartitionedDataWorkload`, `MixedWorkload`, `WorkloadRegistry`, `DataPartitioner` |
 | **Member 3** | **Scheduling & Load Balancing** | `scheduling/` | `BaseScheduler`, `StaticScheduler` (Round-Robin), `DynamicScheduler` (Least-Loaded), `ResourceAwareScheduler` |
 | **Member 4** | **Communication & Coordination** | `communication/` | `MessageBroker`, `RPCClient`, `RPCServer`, `EventPublisher`, `EventConsumer`, `LamportClock` |
-| **Member 5** | **Fault Tolerance & Reliability** | `fault_tolerance/` | `FailureSimulator`, `RetryManager`, `RecoveryManager`, `IdempotencyStore`, `DeadLetterQueue` |
+| **Member 5 - Michael Christoffer Chu** | **Fault Tolerance & Reliability** | `fault_tolerance/` | `FailureSimulator`, `RetryManager`, `RecoveryManager`, `IdempotencyStore`, `DeadLetterQueue` |
 | **Member 6** | **Monitoring, Tracing & Performance Analysis** | `monitoring/`, `analysis/` | `NodeMetricsCollector`, `ClusterMetricsCollector`, `TraceManager`, `PerformanceAnalyzer`, `OverheadCalculator` |
 | **Member 7** | **Coordinator, Worker Runtime, Storage & Reporting**| `coordinator/`, `worker/`, `storage/`, `dashboard/`, `reporting/` | `CoordinatorService`, `WorkerService`, `TaskExecutor`, `ExperimentRepository`, `DashboardService`, `ReportGenerator` |
 
@@ -82,6 +82,59 @@ python -m pytest tests/test_workloads.py -v
 Smoke scenario telah menjalankan CPU dan word count melalui dua proses worker terpisah, serta mixed workload melalui dua proses dengan file sementara dan HTTP server lokal sungguhan. Ini membuktikan kernel lintas proses dan network I/O lokal, bukan deployment Docker/gRPC/Redis.
 
 ---
+
+### Implementasi Anggota 5 — Michael Christoffer Chu
+
+Modul `fault_tolerance` menangani kegagalan sistem secara *gracefully* melalui pencegahan duplikasi, pengulangan eksekusi yang gagal secara adaptif, serta penyediaan mekanisme diagnosa. Tidak memerlukan library eksternal, dan langsung siap jika ingin di-*upgrade* ke sistem Redis sungguhan.
+
+| Fitur | Implementasi | Konfigurasi |
+|---|---|---|
+| **Idempotency Store (TTL)** | Mencegah sebuah *task* dieksekusi ganda jika sistem *recovery* mengirimnya dua kali. Menggunakan struktur in-memory dengan *Time-to-Live (TTL) eviction* otomatis untuk mencegah *memory leak*. Siap untuk migrasi ke Redis. | Parameter `ttl_seconds` untuk menentukan usia kedaluwarsa penyimpanan (default: 3600 detik). |
+| **Retry Manager (Jitter)** | Mengulang *task* gagal dengan algoritma **Exponential Backoff**. Ditambahkan *Randomized Jitter* (0.1 - 1.0 detik) untuk mencegah efek *Thundering Herd* (server *down* karena diserang *worker* yang hidup bersamaan). | Bergantung pada `RetryPolicy`: `initial_backoff_seconds`, `backoff_multiplier`, dan `max_backoff_seconds`. |
+| **Dead-Letter Queue (DLQ)** | Menampung *task* yang sudah melewati batas maksimal *retry*. Menyediakan fungsi `analyze_failures()` untuk laporan *post-mortem diagnostics* (pengelompokan alasan kematian *task* secara otomatis). | Terintegrasi langsung dan dipanggil otomatis oleh `RetryManager`. |
+| **Chaos Simulator** | *Engine* penyuntik kekacauan untuk menguji *resilience* (ketahanan) kode anggota lain. Mendukung simulasi *Worker Crash* total, *High Latency*, *Packet Loss*, dan *Network Partition (Split-Brain)*. | Probabilitas kegagalan diatur melalui parameter `failure_rate` dan `issue_probability`. |
+| **Task Recovery** | Mendeteksi *task* berstatus *running* yang "terlantar" karena node/workernya terputus. Mampu membaca data *checkpoint* untuk memulihkan *progress* secara parsial tanpa harus mengulang komputasi dari nol. | Mengambil input dari `active_tasks` dan `failed_node_ids` yang dilaporkan oleh sistem *monitoring*. |
+
+Contoh penggunaan skenario *Fault Tolerance* secara mandiri:
+
+```python
+import time
+from pycoremark.fault_tolerance.idempotency import InMemoryIdempotencyStore
+from pycoremark.fault_tolerance.dlq import InMemoryDeadLetterQueue
+from pycoremark.fault_tolerance.retry import RetryManager
+from pycoremark.models.event import RetryPolicy
+from pycoremark.models.task import Task
+
+# 1. Inisialisasi Komponen Pengaman
+store = InMemoryIdempotencyStore(ttl_seconds=3600)
+dlq = InMemoryDeadLetterQueue()
+
+# Kebijakan: Max 3x percobaan, tunggu 1s -> 2s -> 4s (maks 5s), ditambah Jitter
+policy = RetryPolicy(initial_backoff_seconds=1, backoff_multiplier=2, max_backoff_seconds=5, max_retries=3)
+retry_mgr = RetryManager(default_policy=policy)
+retry_mgr.dlq = dlq  # Integrasi DLQ
+
+# 2. Pipeline Eksekusi Task Aman
+def process_task_safely(task: Task, executor_func):
+    # A. Cek duplikasi (Idempotency)
+    if store.has_seen(task.task_id):
+        return store.get_result(task.task_id)
+
+    # B. Eksekusi dengan sistem Retry & Jitter
+    while retry_mgr.can_retry(task):
+        try:
+            result = executor_func(task)
+            store.record(task.task_id, value=result) # Catat keberhasilan
+            return result
+        except Exception as e:
+            delay = retry_mgr.prepare_retry(task)
+            time.sleep(delay) # Sleep acak (backoff + jitter)
+
+    # C. Jika tetap gagal, task otomatis terbuang ke DLQ oleh kebijakan sistem
+    # Lakukan diagnosa: print(dlq.analyze_failures())
+    return None
+
+    ---
 
 ## 📁 Struktur Folder Proyek
 
