@@ -3,6 +3,7 @@
 TODO(Member 5): Add randomized jitter to avoid thundering herd on recovery.
 """
 
+import random
 from typing import Optional
 from pycoremark.models.event import RetryPolicy
 from pycoremark.models.task import Task, TaskStatus
@@ -41,10 +42,12 @@ class RetryManager:
         """
         task.retry_count += 1
         task.status = TaskStatus.RETRYING
+        
         # Exponential backoff calculation
-        backoff = min(
-            self.policy.initial_backoff_seconds * (self.policy.backoff_multiplier ** (task.retry_count - 1)),
-            self.policy.max_backoff_seconds,
-        )
-        return backoff
-
+        base_backoff = self.policy.initial_backoff_seconds * (self.policy.backoff_multiplier ** (task.retry_count - 1))
+        backoff = min(base_backoff, self.policy.max_backoff_seconds)
+        
+        # DONE(Member 5): Ditambahkan randomized jitter (waktu acak 0.1 - 1.0 detik)
+        jitter = random.uniform(0.1, 1.0)
+        
+        return backoff + jitter

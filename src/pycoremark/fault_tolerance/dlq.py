@@ -4,7 +4,8 @@ TODO(Member 5): Implement post-mortem diagnostics and manual replay CLI tools.
 """
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Dict, Any
+from collections import Counter
 from pycoremark.models.task import Task, TaskStatus
 
 
@@ -36,4 +37,12 @@ class InMemoryDeadLetterQueue(DeadLetterQueue):
     def list_all(self) -> List[tuple[Task, str]]:
         """Return all dead-lettered entries."""
         return list(self._dlq)
-
+        
+    # DONE(Member 5): Implementasi Post-mortem diagnostics
+    def analyze_failures(self) -> Dict[str, Any]:
+        """Menganalisis dan mengelompokkan alasan kenapa task bisa gagal masuk DLQ."""
+        reasons = [reason for _, reason in self._dlq]
+        return {
+            "total_dead_tasks": len(self._dlq),
+            "reasons_breakdown": dict(Counter(reasons))
+        }
