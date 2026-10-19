@@ -1,4 +1,7 @@
-"""Task recovery manager for orphan tasks running on crashed nodes."""
+"""Task recovery manager for orphan tasks running on crashed nodes.
+
+TODO(Member 5): Implement state checkpoint reconciliation and partial progress recovery.
+"""
 
 from typing import List
 from pycoremark.common.logging import get_logger
@@ -18,7 +21,16 @@ class RecoveryManager:
         active_tasks: List[Task],
         failed_node_ids: List[str],
     ) -> List[Task]:
-        
+        """Filter tasks that were assigned to failed nodes and need re-dispatch.
+
+        Args:
+            active_tasks: Full set of in-flight cluster tasks.
+            failed_node_ids: Identifiers of nodes confirmed dead or suspected.
+
+        Returns:
+            List of orphan tasks to be rescheduled.
+        """
+        # TODO(Member 5): Emit task reassignment events and reset assigned_node_id
         orphaned: List[Task] = []
         for task in active_tasks:
             if (
@@ -30,19 +42,9 @@ class RecoveryManager:
                     task.task_id,
                     task.assigned_node_id,
                 )
-                
-                # DONE(Member 5): Implementasi partial progress checkpoint reconciliation
-                if hasattr(task, 'checkpoint_data') and task.checkpoint_data:
-                    logger.info(f"Task {task.task_id} mempunyai data checkpoint. Akan dilanjutkan dari titik terakhir.")
-                else:
-                    logger.info(f"Task {task.task_id} diulang dari awal (tanpa checkpoint).")
-
-                # Reset task
                 task.status = TaskStatus.PENDING
                 task.assigned_node_id = None
                 orphaned.append(task)
-                
-                # DONE(Member 5): Emit task reassignment events
-                logger.info(f"EVENT PUBLISHED: [TASK_REASSIGNED] untuk task_id={task.task_id}")
 
         return orphaned
+
