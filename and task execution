@@ -1,0 +1,437 @@
+[1mdiff --git a/src/pycoremark/worker/agents.py b/src/pycoremark/worker/agents.py[m
+[1mindex e2bd837..8b83ee1 100644[m
+[1m--- a/src/pycoremark/worker/agents.py[m
+[1m+++ b/src/pycoremark/worker/agents.py[m
+[36m@@ -1,17 +1,71 @@[m
+[31m-"""Worker background agents for heartbeat emission and telemetry reporting.[m
+ [m
+[31m-TODO(Member 7): Implement asynchronous threading loops with graceful cancellation signals.[m
+[31m-"""[m
+[32m+[m[32m"""Worker background agents for heartbeat emission and telemetry reporting."""[m
+ [m
+ from datetime import datetime, timezone[m
+[32m+[m[32mfrom threading import Event, Lock, Thread[m
+[32m+[m
+ from pycoremark.communication.broker import MessageBroker[m
+[32m+[m[32mfrom pycoremark.common.logging import get_logger[m
+ from pycoremark.models.metrics import MetricSample[m
+ from pycoremark.models.node import Heartbeat, NodeStatus[m
+ from pycoremark.monitoring.collector import NodeMetricsCollector[m
+ [m
+[32m+[m[32mlogger = get_logger("worker.agents")[m
+[32m+[m
+[32m+[m
+[32m+[m[32mclass _PeriodicAgent:[m
+[32m+[m[32m    """Base class for cancellable periodic background agents."""[m
+[32m+[m
+[32m+[m[32m    def __init__(self, interval_seconds: float) -> None:[m
+[32m+[m[32m        if interval_seconds <= 0:[m
+[32m+[m[32m            raise ValueError("interval_seconds must be greater than zero")[m
+[32m+[m
+[32m+[m[32m        self.interval_seconds = interval_seconds[m
+[32m+[m[32m        self._stop_event = Event()[m
+[32m+[m[32m        self._thread: Thread | None = None[m
+[32m+[m[32m        self._lock = Lock()[m
+[32m+[m
+[32m+[m[32m    def _run_once(self) -> None:[m
+[32m+[m[32m        raise NotImplementedError[m
+[32m+[m
+[32m+[m[32m    def _run_loop(self) -> None:[m
+[32m+[m[32m        while not self._stop_event.is_set():[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                self._run_once()[m
+[32m+[m[32m            except Exception:[m
+[32m+[m[32m                logger.exception("%s periodic execution failed", type(self).__name__)[m
+[32m+[m
+[32m+[m[32m            self._stop_event.wait(self.interval_seconds)[m
+[32m+[m
+[32m+[m[32m    def start(self) -> None:[m
+[32m+[m[32m        """Start the periodic loop once."""[m
+[32m+[m[32m        with self._lock:[m
+[32m+[m[32m            if self._thread is not None and self._thread.is_alive():[m
+[32m+[m[32m                return[m
+ [m
+[31m-class WorkerHeartbeatAgent:[m
+[31m-    """Periodically produces Heartbeat packets to notify the coordinator of liveness."""[m
+[32m+[m[32m            self._stop_event.clear()[m
+[32m+[m[32m            self._thread = Thread([m
+[32m+[m[32m                target=self._run_loop,[m
+[32m+[m[32m                name=f"{type(self).__name__}-thread",[m
+[32m+[m[32m                daemon=True,[m
+[32m+[m[32m            )[m
+[32m+[m[32m            self._thread.start()[m
+[32m+[m
+[32m+[m[32m    def stop(self, timeout: float | None = 5.0) -> None:[m
+[32m+[m[32m        """Signal cancellation and wait briefly for the loop to finish."""[m
+[32m+[m[32m        self._stop_event.set()[m
+[32m+[m[32m        thread = self._thread[m
+[32m+[m
+[32m+[m[32m        if thread is not None and thread is not __import__("threading").current_thread():[m
+[32m+[m[32m            thread.join(timeout=timeout)[m
+[32m+[m
+[32m+[m[32m        with self._lock:[m
+[32m+[m[32m            if thread is not None and not thread.is_alive():[m
+[32m+[m[32m                self._thread = None[m
+[32m+[m
+[32m+[m
+[32m+[m[32mclass WorkerHeartbeatAgent(_PeriodicAgent):[m
+[32m+[m[32m    """Periodically publishes worker heartbeat packets."""[m
+ [m
+     def __init__([m
+         self,[m
+[36m@@ -19,30 +73,35 @@[m [mclass WorkerHeartbeatAgent:[m
+         broker: MessageBroker,[m
+         interval_seconds: float = 2.0,[m
+     ) -> None:[m
+[31m-        """Initialize heartbeat agent."""[m
+[32m+[m[32m        super().__init__(interval_seconds)[m
+         self.node_id = node_id[m
+         self.broker = broker[m
+[31m-        self.interval_seconds = interval_seconds[m
+         self._seq = 0[m
+[32m+[m[32m        self._seq_lock = Lock()[m
+ [m
+     def generate_heartbeat(self) -> Heartbeat:[m
+[31m-        """Create a new heartbeat payload."""[m
+[31m-        self._seq += 1[m
+[32m+[m[32m        """Create a heartbeat with a monotonically increasing sequence."""[m
+[32m+[m[32m        with self._seq_lock:[m
+[32m+[m[32m            self._seq += 1[m
+[32m+[m[32m            sequence = self._seq[m
+[32m+[m
+         return Heartbeat([m
+             node_id=self.node_id,[m
+[31m-            sequence_number=self._seq,[m
+[32m+[m[32m            sequence_number=sequence,[m
+             timestamp=datetime.now(timezone.utc),[m
+             status=NodeStatus.READY,[m
+         )[m
+ [m
+     def send_heartbeat(self) -> None:[m
+[31m-        """Send heartbeat packet to broker topic."""[m
+[31m-        hb = self.generate_heartbeat()[m
+[31m-        self.broker.publish("cluster.heartbeats", hb)[m
+[32m+[m[32m        """Publish one heartbeat."""[m
+[32m+[m[32m        self.broker.publish("cluster.heartbeats", self.generate_heartbeat())[m
+[32m+[m
+[32m+[m[32m    def _run_once(self) -> None:[m
+[32m+[m[32m        self.send_heartbeat()[m
+ [m
+ [m
+[31m-class WorkerMetricsAgent:[m
+[31m-    """Periodically gathers node telemetry and publishes metrics."""[m
+[32m+[m[32mclass WorkerMetricsAgent(_PeriodicAgent):[m
+[32m+[m[32m    """Periodically collects and publishes worker telemetry."""[m
+ [m
+     def __init__([m
+         self,[m
+[36m@@ -50,13 +109,15 @@[m [mclass WorkerMetricsAgent:[m
+         broker: MessageBroker,[m
+         interval_seconds: float = 1.0,[m
+     ) -> None:[m
+[31m-        """Initialize metrics agent."""[m
+[32m+[m[32m        super().__init__(interval_seconds)[m
+         self.collector = collector[m
+         self.broker = broker[m
+[31m-        self.interval_seconds = interval_seconds[m
+ [m
+     def send_metrics(self) -> MetricSample:[m
+[31m-        """Collect and publish one metric sample."""[m
+[32m+[m[32m        """Collect and publish one metrics sample."""[m
+         sample = self.collector.collect()[m
+         self.broker.publish("cluster.metrics", sample)[m
+         return sample[m
+[32m+[m
+[32m+[m[32m    def _run_once(self) -> None:[m
+[32m+[m[32m        self.send_metrics()[m
+[1mdiff --git a/src/pycoremark/worker/executor.py b/src/pycoremark/worker/executor.py[m
+[1mindex af1a262..df8b09c 100644[m
+[1m--- a/src/pycoremark/worker/executor.py[m
+[1m+++ b/src/pycoremark/worker/executor.py[m
+[36m@@ -1,10 +1,9 @@[m
+[31m-"""Worker task execution engine.[m
+ [m
+[31m-TODO(Member 7): Add process-isolation sandbox and memory limits per task execution.[m
+[31m-"""[m
+[32m+[m[32m"""Worker task execution engine."""[m
+ [m
+[31m-from datetime import datetime, timezone[m
+ import time[m
+[32m+[m[32mfrom datetime import datetime, timezone[m
+[32m+[m
+ from pycoremark.common.logging import get_logger[m
+ from pycoremark.models.task import Task, TaskResult, TaskStatus[m
+ from pycoremark.workloads.registry import WorkloadRegistry[m
+[36m@@ -13,49 +12,51 @@[m [mlogger = get_logger("worker.executor")[m
+ [m
+ [m
+ class TaskExecutor:[m
+[31m-    """Executes distributed tasks locally on the worker node."""[m
+[32m+[m[32m    """Executes tasks on a worker node."""[m
+ [m
+     def __init__(self, node_id: str, workload_registry: WorkloadRegistry) -> None:[m
+[31m-        """Initialize executor with node identifier and workload catalog.[m
+[31m-[m
+[31m-        Args:[m
+[31m-            node_id: Local worker identifier.[m
+[31m-            workload_registry: Catalog of available workload implementations.[m
+[31m-        """[m
+         self.node_id = node_id[m
+         self.workload_registry = workload_registry[m
+ [m
+     def execute(self, task: Task) -> TaskResult:[m
+[31m-        """Run task workload kernel and generate TaskResult.[m
+[31m-[m
+[31m-        Args:[m
+[31m-            task: Task to process.[m
+[31m-[m
+[31m-        Returns:[m
+[31m-            TaskResult with status and execution duration.[m
+[31m-        """[m
+[32m+[m[32m        """Execute a task and return its result."""[m
+         logger.info("Executing task %s on node %s", task.task_id, self.node_id)[m
+[31m-        start_time = time.perf_counter()[m
+[32m+[m[32m        started = time.perf_counter()[m
+[32m+[m
+         try:[m
+[31m-            workload_cls = self.workload_registry.get(task.workload_name)[m
+[31m-            # Placeholder instantiation: config can be partially created from task payload[m
+[31m-            # TODO(Member 7): Look up cached workload instance[m
+[31m-            execution_duration = time.perf_counter() - start_time[m
+[32m+[m[32m            workload = self.workload_registry.get(task.workload_name)[m
+[32m+[m
+[32m+[m[32m            # Support workload implementations that expose a run() method[m
+[32m+[m[32m            # or are directly callable. Adapt this section if the project's[m
+[32m+[m[32m            # workload interface specifies a different execution contract.[m
+[32m+[m[32m            if hasattr(workload, "run") and callable(workload.run):[m
+[32m+[m[32m                output = workload.run()[m
+[32m+[m[32m            elif callable(workload):[m
+[32m+[m[32m                output = workload()[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                raise TypeError([m
+[32m+[m[32m                    f"Workload '{task.workload_name}' has no callable run() method"[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            duration = round(time.perf_counter() - started, 4)[m
+             return TaskResult([m
+                 task_id=task.task_id,[m
+                 worker_id=self.node_id,[m
+                 status=TaskStatus.COMPLETED,[m
+[31m-                output_data={"result": "success"},[m
+[31m-                execution_time_seconds=round(execution_duration, 4),[m
+[32m+[m[32m                output_data={"result": output},[m
+[32m+[m[32m                execution_time_seconds=duration,[m
+                 completed_at=datetime.now(timezone.utc),[m
+             )[m
+[32m+[m
+         except Exception as exc:[m
+[31m-            logger.error("Error executing task %s: %s", task.task_id, str(exc))[m
+[32m+[m[32m            duration = round(time.perf_counter() - started, 4)[m
+[32m+[m[32m            logger.exception("Task %s failed", task.task_id)[m
+[32m+[m
+             return TaskResult([m
+                 task_id=task.task_id,[m
+                 worker_id=self.node_id,[m
+                 status=TaskStatus.FAILED,[m
+                 error_message=str(exc),[m
+[31m-                execution_time_seconds=round(time.perf_counter() - start_time, 4),[m
+[32m+[m[32m                execution_time_seconds=duration,[m
+                 completed_at=datetime.now(timezone.utc),[m
+             )[m
+[1mdiff --git a/src/pycoremark/worker/service.py b/src/pycoremark/worker/service.py[m
+[1mindex 231b7b2..d4af8e1 100644[m
+[1m--- a/src/pycoremark/worker/service.py[m
+[1m+++ b/src/pycoremark/worker/service.py[m
+[36m@@ -1,7 +1,10 @@[m
+[31m-"""Worker node service runtime.[m
+ [m
+[31m-TODO(Member 7): Add concurrent worker task queue polling thread pool.[m
+[31m-"""[m
+[32m+[m[32m"""Worker node service runtime with concurrent task execution."""[m
+[32m+[m
+[32m+[m[32mfrom concurrent.futures import Future, ThreadPoolExecutor[m
+[32m+[m[32mfrom queue import Empty, Queue[m
+[32m+[m[32mfrom threading import Event, Lock, Thread[m
+[32m+[m[32mimport time[m
+ [m
+ from pycoremark.common.config import ClusterConfig[m
+ from pycoremark.common.logging import get_logger[m
+[36m@@ -24,16 +27,24 @@[m [mclass WorkerService:[m
+         metrics_agent: WorkerMetricsAgent,[m
+         broker: MessageBroker,[m
+     ) -> None:[m
+[31m-        """Initialize WorkerService with dependency injection."""[m
+         self.config = config[m
+         self.executor = executor[m
+         self.heartbeat_agent = heartbeat_agent[m
+         self.metrics_agent = metrics_agent[m
+         self.broker = broker[m
+[32m+[m
+         self._is_running = False[m
+[32m+[m[32m        self._stop_event = Event()[m
+[32m+[m[32m        self._poll_thread: Thread | None = None[m
+[32m+[m[32m        self._pool: ThreadPoolExecutor | None = None[m
+[32m+[m[32m        self._pending: set[Future] = set()[m
+[32m+[m[32m        self._pending_lock = Lock()[m
+[32m+[m
+[32m+[m[32m        self._task_queue: Queue = Queue()[m
+[32m+[m[32m        self._topic = f"worker.{self.config.worker_id}.tasks"[m
+ [m
+     def build_node_info(self) -> NodeInfo:[m
+[31m-        """Create NodeInfo descriptor for registration with coordinator."""[m
+[32m+[m[32m        """Build the descriptor used to register this worker."""[m
+         return NodeInfo([m
+             node_id=self.config.worker_id,[m
+             hostname="localhost",[m
+[36m@@ -47,23 +58,144 @@[m [mclass WorkerService:[m
+             status=NodeStatus.READY,[m
+         )[m
+ [m
+[32m+[m[32m    def submit_task(self, task) -> Future:[m
+[32m+[m[32m        """Submit a task to the local thread pool."""[m
+[32m+[m[32m        if not self._is_running or self._pool is None:[m
+[32m+[m[32m            raise RuntimeError("WorkerService is not running")[m
+[32m+[m
+[32m+[m[32m        future = self._pool.submit(self.executor.execute, task)[m
+[32m+[m
+[32m+[m[32m        with self._pending_lock:[m
+[32m+[m[32m            self._pending.add(future)[m
+[32m+[m
+[32m+[m[32m        future.add_done_callback(self._on_task_done)[m
+[32m+[m[32m        return future[m
+[32m+[m
+[32m+[m[32m    def _on_task_done(self, future: Future) -> None:[m
+[32m+[m[32m        with self._pending_lock:[m
+[32m+[m[32m            self._pending.discard(future)[m
+[32m+[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            result = future.result()[m
+[32m+[m[32m            logger.info([m
+[32m+[m[32m                "Task finished: task_id=%s status=%s",[m
+[32m+[m[32m                getattr(result, "task_id", "unknown"),[m
+[32m+[m[32m                getattr(result, "status", "unknown"),[m
+[32m+[m[32m            )[m
+[32m+[m[32m            # Publish results only if the broker implements this operation.[m
+[32m+[m[32m            publish_result = getattr(self.broker, "publish", None)[m
+[32m+[m[32m            if callable(publish_result):[m
+[32m+[m[32m                publish_result("cluster.task_results", result)[m
+[32m+[m[32m        except Exception:[m
+[32m+[m[32m            logger.exception("Worker task future failed")[m
+[32m+[m
+[32m+[m[32m    def _poll_task(self):[m
+[32m+[m[32m        """Try to retrieve one task from the broker.[m
+[32m+[m
+[32m+[m[32m        Returns None when no supported polling API is available or no[m
+[32m+[m[32m        message is ready. Adjust this method to the project's broker API.[m
+[32m+[m[32m        """[m
+[32m+[m[32m        for method_name in ("poll", "get_message", "receive", "consume", "get"):[m
+[32m+[m[32m            method = getattr(self.broker, method_name, None)[m
+[32m+[m[32m            if not callable(method):[m
+[32m+[m[32m                continue[m
+[32m+[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                message = method(self._topic)[m
+[32m+[m[32m            except (Empty, TimeoutError):[m
+[32m+[m[32m                return None[m
+[32m+[m[32m            except TypeError:[m
+[32m+[m[32m                continue[m
+[32m+[m[32m            except Exception:[m
+[32m+[m[32m                logger.exception("Broker polling failed using %s", method_name)[m
+[32m+[m[32m                return None[m
+[32m+[m
+[32m+[m[32m            if message is None:[m
+[32m+[m[32m                return None[m
+[32m+[m
+[32m+[m[32m            # Some brokers return (topic, payload) or an envelope with payload.[m
+[32m+[m[32m            if isinstance(message, tuple) and len(message) == 2:[m
+[32m+[m[32m                message = message[1][m
+[32m+[m[32m            elif hasattr(message, "payload"):[m
+[32m+[m[32m                message = message.payload[m
+[32m+[m
+[32m+[m[32m            return message[m
+[32m+[m
+[32m+[m[32m        return None[m
+[32m+[m
+[32m+[m[32m    def _poll_loop(self) -> None:[m
+[32m+[m[32m        while not self._stop_event.is_set():[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                task = self._task_queue.get_nowait()[m
+[32m+[m[32m            except Empty:[m
+[32m+[m[32m                task = self._poll_task()[m
+[32m+[m
+[32m+[m[32m            if task is None:[m
+[32m+[m[32m                self._stop_event.wait(0.05)[m
+[32m+[m[32m                continue[m
+[32m+[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                self.submit_task(task)[m
+[32m+[m[32m            except Exception:[m
+[32m+[m[32m                logger.exception("Unable to submit worker task")[m
+[32m+[m
+     def start(self) -> None:[m
+[31m-        """Start worker service listeners."""[m
+[32m+[m[32m        """Start task processing and background agents."""[m
+[32m+[m[32m        if self._is_running:[m
+[32m+[m[32m            return[m
+[32m+[m
+         logger.info([m
+             "WorkerService '%s' starting with %d cores and %d MB RAM",[m
+             self.config.worker_id,[m
+             self.config.worker_cores,[m
+             self.config.worker_memory_mb,[m
+         )[m
+[32m+[m
+[32m+[m[32m        workers = max(1, int(self.config.worker_cores))[m
+[32m+[m[32m        self._pool = ThreadPoolExecutor([m
+[32m+[m[32m            max_workers=workers,[m
+[32m+[m[32m            thread_name_prefix=f"worker-{self.config.worker_id}",[m
+[32m+[m[32m        )[m
+[32m+[m[32m        self._stop_event.clear()[m
+         self._is_running = True[m
+[31m-        # Subscribe to worker task queue[m
+[31m-        topic = f"worker.{self.config.worker_id}.tasks"[m
+[31m-        self.broker.subscribe(topic)[m
+[31m-        # Emit initial heartbeat[m
+[31m-        self.heartbeat_agent.send_heartbeat()[m
+[32m+[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            self.broker.subscribe(self._topic)[m
+[32m+[m[32m            self.heartbeat_agent.send_heartbeat()[m
+[32m+[m[32m            self.metrics_agent.send_metrics()[m
+[32m+[m
+[32m+[m[32m            self.heartbeat_agent.start()[m
+[32m+[m[32m            self.metrics_agent.start()[m
+[32m+[m
+[32m+[m[32m            self._poll_thread = Thread([m
+[32m+[m[32m                target=self._poll_loop,[m
+[32m+[m[32m                name=f"worker-poller-{self.config.worker_id}",[m
+[32m+[m[32m                daemon=True,[m
+[32m+[m[32m            )[m
+[32m+[m[32m            self._poll_thread.start()[m
+[32m+[m[32m        except Exception:[m
+[32m+[m[32m            logger.exception("Failed to start WorkerService")[m
+[32m+[m[32m            self.stop()[m
+[32m+[m[32m            raise[m
+ [m
+     def stop(self) -> None:[m
+[31m-        """Stop worker service."""[m
+[32m+[m[32m        """Stop polling, stop agents, and wait for submitted tasks."""[m
+[32m+[m[32m        if not self._is_running and self._pool is None:[m
+[32m+[m[32m            return[m
+[32m+[m
+         logger.info("WorkerService '%s' stopping", self.config.worker_id)[m
+         self._is_running = False[m
+[32m+[m[32m        self._stop_event.set()[m
+[32m+[m
+[32m+[m[32m        self.heartbeat_agent.stop()[m
+[32m+[m[32m        self.metrics_agent.stop()[m
+[32m+[m
+[32m+[m[32m        if self._poll_thread is not None:[m
+[32m+[m[32m            self._poll_thread.join(timeout=5.0)[m
+[32m+[m[32m            self._poll_thread = None[m
+[32m+[m
+[32m+[m[32m        if self._pool is not None:[m
+[32m+[m[32m            self._pool.shutdown(wait=True, cancel_futures=False)[m
+[32m+[m[32m            self._pool = None[m
+ [m
+[32m+[m[32m        logger.info("WorkerService '%s' stopped", self.config.worker_id)[m

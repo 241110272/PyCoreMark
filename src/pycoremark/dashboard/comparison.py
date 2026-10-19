@@ -1,9 +1,8 @@
-"""Experiment comparison and historical benchmark diffing service.
 
-TODO(Member 7): Add multi-run statistical hypothesis testing (p-value, t-test).
-"""
+"""Experiment comparison and historical benchmark diffing service."""
 
 from typing import Any, Dict, List
+
 from pycoremark.models.experiment import ExperimentResult
 from pycoremark.storage.base import ExperimentRepository
 
@@ -12,29 +11,38 @@ class ExperimentComparisonService:
     """Compares metrics between multiple benchmark runs."""
 
     def __init__(self, experiment_repository: ExperimentRepository) -> None:
-        """Initialize with experiment repository."""
         self.experiment_repository = experiment_repository
 
     def compare(self, experiment_ids: List[str]) -> Dict[str, Any]:
-        """Generate side-by-side metric comparison table for given experiment IDs."""
+        """Compare benchmark metrics and report missing experiment IDs."""
         runs: List[ExperimentResult] = []
+        missing_experiments: List[str] = []
+
         for exp_id in experiment_ids:
-            res = self.experiment_repository.get_result(exp_id)
-            if res:
-                runs.append(res)
+            result = self.experiment_repository.get_result(exp_id)
+
+            if result is None:
+                missing_experiments.append(exp_id)
+                continue
+
+            runs.append(result)
+
+        metrics = [
+            {
+                "experiment_id": result.experiment_id,
+                "throughput": result.throughput_tasks_per_sec,
+                "speedup": result.speedup,
+                "efficiency": result.efficiency,
+                "avg_latency": result.average_latency_seconds,
+                "duration": result.duration_seconds,
+            }
+            for result in runs
+        ]
 
         return {
-            "compared_experiments": experiment_ids,
-            "metrics": [
-                {
-                    "experiment_id": r.experiment_id,
-                    "throughput": r.throughput_tasks_per_sec,
-                    "speedup": r.speedup,
-                    "efficiency": r.efficiency,
-                    "avg_latency": r.average_latency_seconds,
-                    "duration": r.duration_seconds,
-                }
-                for r in runs
-            ],
+            "compared_experiments": list(experiment_ids),
+            "metrics": metrics,
+            "missing_experiments": missing_experiments,
+            "requested_count": len(experiment_ids),
+            "found_count": len(runs),
         }
-
