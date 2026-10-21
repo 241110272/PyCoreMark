@@ -1,7 +1,5 @@
-"""Common domain exceptions for PyCoreMark.
 
-TODO(Member 1): Add specialized exceptions as cluster management matures.
-"""
+"""Common domain exceptions for PyCoreMark."""
 
 
 class PyCoreMarkError(Exception):
@@ -18,6 +16,10 @@ class NodeNotFoundError(NodeError):
 
 class NodeAlreadyRegisteredError(NodeError):
     """Raised when attempting to register a node with an existing identifier."""
+
+
+class NodeRegistryPersistenceError(NodeError):
+    """Raised when loading or saving the persistent node registry fails."""
 
 
 class TaskError(PyCoreMarkError):
@@ -62,4 +64,3 @@ class ValidationError(PyCoreMarkError):
 
 class InvalidWorkloadConfigError(ValidationError):
     """Raised when a workload specification is malformed."""
-
