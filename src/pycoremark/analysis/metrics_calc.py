@@ -3,7 +3,7 @@
 TODO(Member 6): Add Gustafson's Law evaluation in addition to Amdahl's Law.
 """
 
-from typing import Dict, List
+from typing import Dict
 
 
 class ThroughputCalculator:
@@ -12,7 +12,7 @@ class ThroughputCalculator:
     @staticmethod
     def calculate(completed_tasks: int, total_duration_seconds: float) -> float:
         """Calculate throughput (tasks/second)."""
-        if total_duration_seconds <= 0:
+        if total_duration_seconds <= 0 or completed_tasks < 0:
             return 0.0
         return completed_tasks / total_duration_seconds
 
@@ -22,9 +22,13 @@ class SpeedupCalculator:
 
     @staticmethod
     def calculate(single_node_duration: float, cluster_duration: float) -> float:
-        """Calculate speedup factor."""
+        """Calculate speedup factor.
+
+        Returns 0.0 jika input tidak valid (durasi <= 0), bukan 1.0,
+        agar tidak menyesatkan seolah-olah performa sama dengan baseline.
+        """
         if cluster_duration <= 0 or single_node_duration <= 0:
-            return 1.0
+            return 0.0
         return single_node_duration / cluster_duration
 
 
@@ -34,13 +38,13 @@ class EfficiencyCalculator:
     @staticmethod
     def calculate(speedup: float, node_count: int) -> float:
         """Calculate efficiency ratio (typically between 0.0 and 1.0)."""
-        if node_count <= 0:
+        if node_count <= 0 or speedup <= 0:
             return 0.0
         return speedup / node_count
 
 
 class LoadBalanceCalculator:
-    """Measures task distribution variance across nodes (Gini index or coefficient of variation)."""
+    """Measures task distribution variance across nodes."""
 
     @staticmethod
     def calculate_imbalance_ratio(tasks_per_node: Dict[str, int]) -> float:
@@ -52,4 +56,3 @@ class LoadBalanceCalculator:
         if avg_tasks == 0:
             return 0.0
         return max(counts) / avg_tasks
-

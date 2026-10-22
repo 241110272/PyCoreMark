@@ -18,6 +18,7 @@ class NodeMetricsCollector:
             node_id: Identifier of the monitored node.
         """
         self.node_id = node_id
+        self._warmup_done = False
 
     def collect(self) -> MetricSample:
         """Collect current metric sample for this node.
@@ -25,7 +26,9 @@ class NodeMetricsCollector:
         Returns:
             MetricSample containing telemetry measurements.
         """
-        # TODO(Member 6): Replace simulation with psutil.cpu_percent() and psutil.virtual_memory()
+        # TODO(Member 6): Replace simulation with psutil.
+        # Saat migrasi ke psutil di Windows, panggil psutil.cpu_percent(interval=None)
+        # sekali di __init__ (warm-up) karena panggilan pertama selalu 0.0.
         simulated_cpu = round(random.uniform(10.0, 85.0), 2)
         simulated_mem_used = round(random.uniform(512.0, 3072.0), 2)
         return MetricSample(

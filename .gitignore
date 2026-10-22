@@ -44,3 +44,54 @@ htmlcov/
 *.swp
 *.swo
 
+
+# --------------------------------------------------------------
+
+# Coverage & test artifacts (lanjutan)
+.coverage.*
+coverage.xml
+.tox/
+.nox/
+
+# Type checker / linter cache
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
+
+# Env template (biarkan .env.example tetap ke-track)
+!.env.example
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Runtime / PID / seed
+*.pid
+*.seed
+
+# Temporary / backup files
+*.tmp
+*.temp
+*.bak
+*.old
+
+# Build metadata tambahan
+pip-wheel-metadata/
+*.whl
+
+# Hasil eksperimen & report
+results/
+output/
+outputs/
+reports/
+
+# Output mixed workload (JSONL per partisi, dari README)
+*.jsonl
+
+# Trace dump / metrics export lokal
+traces/
+metrics-export/
+*.trace
+*.span
