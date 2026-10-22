@@ -1,12 +1,10 @@
-"""Cluster node and heartbeat domain models.
 
-TODO(Member 1): Add network interface metadata and GPU resource descriptors.
-"""
+"""Cluster node and heartbeat domain models."""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 
 def _utc_now() -> datetime:
@@ -19,9 +17,33 @@ class NodeStatus(str, Enum):
     INITIALIZING = "INITIALIZING"
     READY = "READY"
     BUSY = "BUSY"
+    DRAINING = "DRAINING"
     SUSPECTED = "SUSPECTED"
     DEAD = "DEAD"
     OFFLINE = "OFFLINE"
+
+
+@dataclass
+class NetworkInterface:
+    """Network interface information reported by a worker."""
+
+    name: str
+    mac_address: Optional[str] = None
+    ipv4_addresses: List[str] = field(default_factory=list)
+    ipv6_addresses: List[str] = field(default_factory=list)
+    bandwidth_mbps: Optional[float] = None
+
+
+@dataclass
+class GPUResource:
+    """GPU device and memory information reported by a worker."""
+
+    device_id: str
+    name: str
+    total_memory_mb: int
+    available_memory_mb: int
+    compute_capability: Optional[str] = None
+    utilization_percent: Optional[float] = None
 
 
 @dataclass
@@ -33,6 +55,7 @@ class NodeResources:
     total_memory_mb: int
     available_memory_mb: int
     metadata: Dict[str, Any] = field(default_factory=dict)
+    gpus: List[GPUResource] = field(default_factory=list)
 
 
 @dataclass
@@ -47,6 +70,10 @@ class NodeInfo:
     registered_at: datetime = field(default_factory=_utc_now)
     last_heartbeat_at: datetime = field(default_factory=_utc_now)
     tags: Dict[str, str] = field(default_factory=dict)
+    active_tasks: int = 0
+    network_interfaces: List[NetworkInterface] = field(
+        default_factory=list
+    )
 
 
 @dataclass
