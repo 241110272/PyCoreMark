@@ -1,7 +1,10 @@
-"""Communication abstractions, message brokers, RPC, and logical clocks."""
+"""Communication abstractions, message brokers, RPC, and logical clocks.
 
-from pycoremark.communication.broker import InMemoryMessageBroker, MessageBroker
-from pycoremark.communication.clock import LamportClock
+Member 4: Julius Einstein Chandra (241110272)
+"""
+
+from pycoremark.communication.broker import BrokerMessage, InMemoryMessageBroker, MessageBroker
+from pycoremark.communication.clock import LamportClock, VectorClock
 from pycoremark.communication.events import EventConsumer, EventPublisher
 from pycoremark.communication.rpc import (
     InMemoryRPCClient,
@@ -13,6 +16,7 @@ from pycoremark.communication.rpc import (
 __all__ = [
     "MessageBroker",
     "InMemoryMessageBroker",
+    "BrokerMessage",
     "RPCClient",
     "RPCServer",
     "InMemoryRPCClient",
@@ -20,5 +24,5 @@ __all__ = [
     "EventPublisher",
     "EventConsumer",
     "LamportClock",
+    "VectorClock",
 ]
-

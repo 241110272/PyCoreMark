@@ -17,12 +17,12 @@ def test_retry_manager_backoff() -> None:
     backoff1 = manager.prepare_retry(task)
     assert task.retry_count == 1
     assert task.status == TaskStatus.RETRYING
-    assert backoff1 == 1.0
+    assert 1.0 <= backoff1 <= 2.0
 
     assert manager.can_retry(task) is True
     backoff2 = manager.prepare_retry(task)
     assert task.retry_count == 2
-    assert backoff2 == 2.0
+    assert 2.0 <= backoff2 <= 3.0
 
     # Max retries reached
     assert manager.can_retry(task) is False

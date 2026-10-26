@@ -2,6 +2,49 @@
 PyCoreMark adalah kerangka kerja simulasi *virtual cluster* terdistribusi yang dirancang untuk mengukur, menganalisis, dan membandingkan performa penjadwalan (*scheduling*), beban kerja (*workload*), toleransi kesalahan (*fault tolerance*), serta metrik sistem terdistribusi (seperti *throughput*, *speedup*, *efficiency*, dan *overhead*).
 Repository ini berisi **arsitektur modular skeleton** siap pakai yang dirancang untuk dikembangkan secara kolaboratif oleh **tujuh (7) anggota tim** secara independen tanpa saling bertabrakan (*circular dependency free*).
 ---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---
 ## 🏛️ Arsitektur Sistem
 PyCoreMark mengadopsi model terdistribusi terkoordinasi (*coordinator-worker pattern*) dengan pertukaran pesan asinkron dan RPC:
 1. **Coordinator**: Mengatur keanggotaan cluster, memantau *liveness* node, menjadwalkan task ke antrean worker, mengontrol siklus eksperimen, dan mengumpulkan hasil.
@@ -12,21 +55,365 @@ PyCoreMark mengadopsi model terdistribusi terkoordinasi (*coordinator-worker pat
 6. **Analysis & Metrics**: Mesin kalkulasi terpusat untuk *Throughput*, *Speedup*, *Efficiency*, *Load Imbalance*, dan *Communication Overhead*.
 7. **Dashboard & Reporting**: Layanan topologi cluster, pembanding riwayat eksperimen, validator data, dan eksportir laporan (JSON & CSV).
 ---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---
 ## 👥 Pembagian Tanggung Jawab Anggota (7 Tim)
 Setiap anggota kelompok bertanggung jawab atas modul tertentu dengan penanda komentar `TODO(Member X)` di dalam kode sumber:
 | Anggota | Area Tanggung Jawab | Modul Terkait | Komponen Kunci |
-|---|---|---|---|
+|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|
 | **Member 1** | **Core Infrastructure & Cluster Membership** | `common/`, `cluster/` | `NodeRegistry`, `NodeRegistrationService`, `HeartbeatService`, `FailureDetector`, `ClusterManager` |
 | **Member 2 — Filbert Matthew** | **Distributed Workloads & Partitioning** | `workloads/` | `BaseWorkload`, `CPUWorkload`, `PartitionedDataWorkload`, `MixedWorkload`, `WorkloadRegistry`, `DataPartitioner` |
 | **Member 3 - Evan Adhyaksa Baskara** | **Scheduling & Load Balancing** | `scheduling/` | `BaseScheduler`, `StaticScheduler` (Round-Robin), `DynamicScheduler` (Least-Loaded), `ResourceAwareScheduler` |
-| **Member 4** | **Communication & Coordination** | `communication/` | `MessageBroker`, `RPCClient`, `RPCServer`, `EventPublisher`, `EventConsumer`, `LamportClock` |
+| **Member 4 — Julius Einstein Chandra (241110272)** | **Communication & Coordination** | `communication/` | `MessageBroker`, `RPCClient`, `RPCServer`, `EventPublisher`, `EventConsumer`, `LamportClock`, `VectorClock` |
 | **Member 5** | **Fault Tolerance & Reliability** | `fault_tolerance/` | `FailureSimulator`, `RetryManager`, `RecoveryManager`, `IdempotencyStore`, `DeadLetterQueue` |
 | **Member 6** | **Monitoring, Tracing & Performance Analysis** | `monitoring/`, `analysis/` | `NodeMetricsCollector`, `ClusterMetricsCollector`, `TraceManager`, `PerformanceAnalyzer`, `OverheadCalculator` |
 | **Member 7** | **Coordinator, Worker Runtime, Storage & Reporting**| `coordinator/`, `worker/`, `storage/`, `dashboard/`, `reporting/` | `CoordinatorService`, `WorkerService`, `TaskExecutor`, `ExperimentRepository`, `DashboardService`, `ReportGenerator` |
 ### Implementasi Anggota 2 — Filbert Matthew
 Tiga workload di `src/pycoremark/workloads/` sudah menjalankan operasi nyata, bukan hasil dummy. Tidak ada dependency tambahan di luar Python standard library.
 | Fitur | Implementasi | Konfigurasi |
+|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
 |---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|
 | CPU-bound | Menghitung jumlah dan penjumlahan bilangan prima pada rentang `[start, stop)` | `total_tasks` menentukan jumlah task; `parameters.start` default 0; `parameters.stop` default `start + total_tasks * task_complexity` |
 | Dataset / MapReduce | Word count Unicode, case-insensitive, per record; penggabungan hasil parsial | `partitions` menentukan jumlah task; `parameters.records` berupa list string atau `parameters.dataset_path` berupa file UTF-8, satu record per baris |
 | Mixed workload | Membaca rentang baris file, normalisasi teks, SHA-256 berulang, menulis JSONL lokal, HTTP POST ringkasan | Wajib `parameters.dataset_path`, `parameters.output_dir`, dan `parameters.result_url`; `task_complexity` = jumlah putaran hash; `partitions` = jumlah task; timeout jaringan default 10 detik |
@@ -58,12 +445,184 @@ python -m pytest tests/test_workloads.py -v
 ```
 Smoke scenario telah menjalankan CPU dan word count melalui dua proses worker terpisah, serta mixed workload melalui dua proses dengan file sementara dan HTTP server lokal sungguhan. Ini membuktikan kernel lintas proses dan network I/O lokal, bukan deployment Docker/gRPC/Redis.
 ---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---
 ### Implementasi Anggota 5 — Michael Christoffer Chu
 
 Modul `fault_tolerance` menangani kegagalan sistem secara *gracefully* melalui pencegahan duplikasi, pengulangan eksekusi yang gagal secara adaptif, serta penyediaan mekanisme diagnosa. Tidak memerlukan library eksternal, dan langsung siap jika ingin di-*upgrade* ke sistem Redis sungguhan.
 
 | Fitur | Implementasi | Konfigurasi |
+|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
 |---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
+```
+---|
 | **Idempotency Store (TTL)** | Mencegah sebuah *task* dieksekusi ganda jika sistem *recovery* mengirimnya dua kali. Menggunakan struktur in-memory dengan *Time-to-Live (TTL) eviction* otomatis untuk mencegah *memory leak*. Siap untuk migrasi ke Redis. | Parameter `ttl_seconds` untuk menentukan usia kedaluwarsa penyimpanan (default: 3600 detik). |
 | **Retry Manager (Jitter)** | Mengulang *task* gagal dengan algoritma **Exponential Backoff**. Ditambahkan *Randomized Jitter* (0.1 - 1.0 detik) untuk mencegah efek *Thundering Herd* (server *down* karena diserang *worker* yang hidup bersamaan). | Bergantung pada `RetryPolicy`: `initial_backoff_seconds`, `backoff_multiplier`, dan `max_backoff_seconds`. |
 | **Dead-Letter Queue (DLQ)** | Menampung *task* yang sudah melewati batas maksimal *retry*. Menyediakan fungsi `analyze_failures()` untuk laporan *post-mortem diagnostics* (pengelompokan alasan kematian *task* secara otomatis). | Terintegrasi langsung dan dipanggil otomatis oleh `RetryManager`. |
@@ -249,6 +808,49 @@ pycoremark/
     ├── test_scheduler.py
     ├── test_lamport_clock.py
     └── test_fault_tolerance.py
+```
+---
+### Implementasi Anggota 4 — Julius Einstein Chandra (241110272)
+Modul `communication` mengimplementasikan abstraksi perpesanan terdistribusi (*message broker*), *remote procedure call* (RPC) dengan penanganan kegagalan & latensi, pengiriman event asinkron (*pub/sub event streaming*), serta jam logika (*Lamport Clock* & *Vector Clock*) untuk menjamin pengurutan kausalitas event di seluruh cluster.
+
+| Komponen | File | Deskripsi Implementasi |
+|---|---|---|
+| **Message Broker** | `src/pycoremark/communication/broker.py` | Mendukung *wildcard topic matching* (`*` untuk single token, `#` untuk multi token), antrean thread-safe, *fanout pub/sub*, pembatasan masa hidup pesan (*message TTL*), dan perutean otomatis pesan basi ke *Dead-Letter Queue* (DLQ). |
+| **RPC Client & Server** | `src/pycoremark/communication/rpc.py` | Antarmuka RPC sinkron (`call`), simulasi artificial network latency (`simulated_latency_ms`), jitter (`simulated_jitter_ms`), simulasi kegagalan transmisi (`simulated_failure_rate`), batas waktu eksekusi (*timeout*), serta registrasi handler dinamis. |
+| **Event Streaming** | `src/pycoremark/communication/events.py` | `EventPublisher` dan `EventConsumer` untuk transmisi data `ClusterEvent` strongly-typed, sinkronisasi otomatis stempel jam logika, filter berbasis jenis event (`filter_types`) dan filter sumber node (`filter_sources`), serta operasi polling batch. |
+| **Logical Clocks** | `src/pycoremark/communication/clock.py` | Thread-safe `LamportClock` untuk pengurutan linear waktu logika dan `VectorClock` untuk mendeteksi hubungan *happened-before* ($V_1 < V_2$) maupun konkurensi (*concurrent events*) antar-node. |
+
+Contoh penggunaan RPC dan Broker:
+```python
+from pycoremark.communication import InMemoryMessageBroker, InMemoryRPCClient, InMemoryRPCServer, LamportClock, VectorClock
+
+# 1. Message Broker dengan Wildcard
+broker = InMemoryMessageBroker()
+worker_sub = broker.subscribe("worker.*.tasks")
+broker.publish("worker.node1.tasks", {"action": "START_BENCHMARK"})
+msg = worker_sub.get_nowait().payload
+assert msg["action"] == "START_BENCHMARK"
+
+# 2. RPC dengan Timeout & Latensi
+server = InMemoryRPCServer(node_id="worker-1")
+server.register_handler("ping", lambda: "pong")
+server.start()
+
+client = InMemoryRPCClient(registry={"worker-1": server}, simulated_latency_ms=10.0)
+res = client.call("worker-1", "ping", timeout=1.0)
+assert res == "pong"
+
+# 3. Vector Clock Concurrency
+vc1 = VectorClock(local_node_id="nodeA")
+vc2 = VectorClock(local_node_id="nodeB")
+v1 = vc1.tick()
+v2 = vc2.tick()
+assert VectorClock.is_concurrent(v1, v2) is True
+```
+
+Verifikasi pengujian Member 4:
+```bash
+python -m pytest tests/test_communication.py -v
 ```
 ---
 ## 🚀 Panduan Memulai (*Quickstart*)
