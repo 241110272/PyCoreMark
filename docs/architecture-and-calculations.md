@@ -102,17 +102,31 @@ unique worker IDs.
 
 For an experiment, let `T` be its wall-clock distributed-run duration,
 `C` its completed task count, `N` the number of workers that completed at
-least one task, and `B` the sequential baseline duration.
+least one task, and `B` the sequential baseline duration. Let `W` be the sum of
+`processed_numbers` from successful CPU prime tasks.
 
 | Metric | Calculation | Meaning |
 |---|---|---|
 | Throughput | `C / T` | Completed tasks per second. |
+| PyCoreMark CPU points | `W / T / 1,000` | Project-defined absolute CPU score. One point is 1,000 input integers processed per second. |
 | Speedup | `B / T` | Sequential baseline time divided by distributed wall time. |
 | Efficiency | `speedup / N` | Speedup per worker that completed work. |
 | Task load imbalance | `max(tasks per worker) / average(tasks per worker)` | `1.0` is evenly distributed; values above it indicate skew. |
 | Average task latency | arithmetic mean of successful task execution times | Does not include task queue wait. |
 | Latency percentiles | nearest-rank p50, p95, and p99 of successful task times | Tail behavior at task execution level. |
 | Communication/orchestration overhead estimate | `max(0, T - sum(task execution times) / N)` | An estimate, not a direct network measurement. |
+
+The CPU score is emitted only for `cpu_benchmark` runs and the fixed-window
+`scaling` test. It is deliberately not emitted for data, mixed, or storage
+workloads: their work units are different. A score is meaningful for comparing
+the same prime algorithm, integer range, task complexity, and run mode; it is
+not a universal hardware rating and is not numerically compatible with
+Cinebench. The normal CPU run's `W` comes from successful task outputs and its
+`T` includes distributed orchestration; the scaling command uses all input
+numbers processed across valid rounds and its measured sample duration. Score
+values are rounded to two decimal places for display/storage; the formula uses
+the unrounded counts and wall time. The scoring scale is a PyCoreMark project
+definition, not a formula attributed to Cinebench or an external author.
 
 The CLI measures a sequential baseline by executing the same generated work
 partitions one at a time before the distributed run. In remote mode this
@@ -186,3 +200,34 @@ per-operation latency; random-write flush time is not included in that IOPS
 figure. For comparable hardware results, close other disk-heavy applications,
 use the same size and directory, and report whether the target is SSD, HDD, or
 network storage.
+
+### Formula provenance and calculation details
+
+The formulas above describe this implementation; project-defined operational
+choices are called out rather than attributed to an unrelated benchmark.
+
+| Calculation | Implemented formula / convention | Reference or attribution |
+|---|---|---|
+| CPU points | `processed input integers / elapsed seconds / 1,000`; one point is 1,000 input integers/s. | PyCoreMark project-defined scale (no external formula inventor). Inspired by the general throughput-score approach used by benchmark suites, but not Cinebench's scoring formula. |
+| Task throughput | successful task count / distributed wall seconds. | PyCoreMark operational definition; tasks are the counted work unit. |
+| CPU throughput | completed benchmark input integers / measured seconds; CPU points are this rate divided by 1,000. | PyCoreMark operational definition. The scaling test runs the same prime-range partitions each round. |
+| Speedup | sequential baseline wall time / parallel wall time. The scaling test equivalently divides parallel throughput by one-worker throughput for the same fixed work. | Standard parallel speedup; commonly associated with Gene M. Amdahl, “Validity of the Single Processor Approach to Achieving Large Scale Computing Capabilities,” AFIPS Spring Joint Computer Conference, 1967. |
+| Parallel efficiency | speedup / workers that completed tasks (or requested workers in the scaling test). | Standard parallel-efficiency definition; no unique inventor claimed. |
+| Task load imbalance | maximum completed tasks on a worker / average completed tasks per worker. | PyCoreMark project-defined ratio; `1.0` is even, and values above `1.0` indicate skew. |
+| Average task latency | arithmetic mean of successful task execution seconds; excludes queue wait. | Arithmetic mean; PyCoreMark scope convention. |
+| Task latency percentiles | nearest-rank: sort `n` values and select zero-based index `ceil(p*n)-1`, clamped to the sample. | Nearest-rank / inverse empirical CDF (equivalent to Hyndman–Fan Type 1); Hyndman and Fan, “Sample Quantiles in Statistical Packages,” *The American Statistician* 50(4), 1996. |
+| Queue wait | mean and nearest-rank p95 of reported task queue-wait seconds. | PyCoreMark uses worker/task timestamps; remote clock skew can affect it. |
+| Communication/orchestration overhead estimate | `max(0, T - sum(task execution seconds) / max(N, 1))`; task results include final successful and failed results. | PyCoreMark heuristic, not direct network measurement and not a published distributed-systems formula. |
+| Retry rate | retry attempts / total tasks. | PyCoreMark operational definition. |
+| Recovery time | mean elapsed monotonic seconds from first observed failure until a successful retry result. | PyCoreMark operational definition. |
+| Fixed-window CPU throughput | `rounds * tasks_per_round / elapsed seconds`; processed work is `rounds * integers_per_round`. The run continues until elapsed time reaches the target, so its final batch may overshoot. | PyCoreMark scaling methodology. Each round's reduced prime count, sum, processed-number count, and checksum are checked against a sequential reference. |
+| Scaling score | `processed_numbers / actual_duration_seconds / 1,000`. | Same PyCoreMark CPU point scale as above. |
+| Sequential storage throughput | `test_size_MiB / elapsed_seconds`; write duration includes the write and `fsync`. | Dimensional rate calculation; PyCoreMark implementation. MiB is 1,048,576 bytes (IEC binary prefix). |
+| Random storage IOPS | operation count / sum of measured per-operation latencies, separated by reads and writes. | Standard operations-per-second definition; PyCoreMark implementation does not include final random-write `fsync` in IOPS. |
+| Storage latency percentiles | combine random read/write operation latencies, sort, select `round((n-1)*p)` (Python ties-to-even rounding), convert seconds to milliseconds. | PyCoreMark implementation convention; unlike task latency, this uses a nearest-index convention and is not the same quantile method. |
+| Storage fsync time | time immediately around the sequential-write `os.fsync`, converted from seconds to milliseconds. | PyCoreMark measurement boundary; `fsync` semantics are defined by the host operating system. |
+| Failure-detector phi | `-log10(max(1 - NormalCDF(elapsed), 1e-16))`, using learned heartbeat interval mean and standard deviation. | Phi-accrual failure detector, Hayashibara et al., “The φ Accrual Failure Detector,” 23rd IEEE International Symposium on Reliable Distributed Systems (SRDS), 2004. |
+
+These citations identify established source concepts, not a claim that every
+PyCoreMark measurement choice appears verbatim in those works. Where the table
+states “PyCoreMark project-defined,” there is no separate formula inventor.

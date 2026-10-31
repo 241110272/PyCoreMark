@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import math
 import os
+import threading
+import time
 from datetime import datetime
+from uuid import uuid4
 
 import pandas as pd
 import plotly.express as px
@@ -16,6 +19,15 @@ from pycoremark.communication.http_transport import HTTPClusterClient
 
 
 st.set_page_config(page_title="PyCoreMark", page_icon="⚙️", layout="wide")
+st.markdown("""
+<style>
+    [data-testid="stMetric"] { background: linear-gradient(135deg, #151b2c, #202744);
+        border: 1px solid #303b5c; padding: 14px 18px; border-radius: 14px; }
+    div.stButton > button[kind="primary"] { border: 0; border-radius: 10px;
+        background: linear-gradient(90deg, #6d5dfc, #20c6d7); font-weight: 700; }
+    .stProgress > div > div > div > div { background: linear-gradient(90deg, #735bff, #28d7c4); }
+</style>
+""", unsafe_allow_html=True)
 st.title("PyCoreMark — Distributed Cluster Benchmark")
 st.caption("Live membership · worker telemetry · consistent benchmark results · scalability analysis")
 
@@ -161,9 +173,12 @@ with run_tab:
                 "Scale the Compose worker service or start more worker processes first."
             )
         else:
-            with st.spinner("Measuring sequential baseline, running workers, and validating output checksum…"):
+            experiment_id = f"web-{uuid4().hex}"
+            outcome = {}
+
+            def run_in_background():
                 try:
-                    result = client.run_experiment(
+                    outcome["result"] = client.run_experiment(
                         workload=workload, nodes=workers, tasks=int(task_count),
                         complexity=int(complexity), records=int(record_count),
                         scheduler_type=scheduler.upper().replace("-", "_"),
@@ -172,23 +187,129 @@ with run_tab:
                         output_dir=output_dir,
                         result_url=result_url,
                         network_timeout=float(network_timeout),
+                        experiment_id=experiment_id,
                     )
-                    st.session_state["last_result"] = result
                 except Exception as exc:
-                    st.error(f"Benchmark request failed: {exc}")
+                    outcome["error"] = exc
+
+            runner = threading.Thread(target=run_in_background, daemon=True)
+            runner.start()
+            progress_status = st.status("Starting benchmark…", expanded=True)
+            phase_slot = st.empty()
+            progress_slot = st.empty()
+            chart_slot = st.empty()
+            latest_progress = {
+                "phase": "Measuring sequential baseline",
+                "status": "RUNNING",
+                "progress_fraction": 0.0,
+                "completed_tasks": 0,
+                "total_tasks": 0,
+                "elapsed_seconds": 0.0,
+                "points": [{"elapsed_seconds": 0.0, "completed_tasks": 0}],
+            }
+
+            while runner.is_alive():
+                try:
+                    fetched = client.experiment_progress(experiment_id)
+                    if isinstance(fetched, dict):
+                        latest_progress = fetched
+                except Exception:
+                    # The sequential baseline is local to the client and finishes
+                    # before the coordinator begins publishing live progress.
+                    pass
+
+                phase = latest_progress.get("phase", "Preparing benchmark")
+                completed = latest_progress.get("completed_tasks", 0)
+                total = latest_progress.get("total_tasks", 0)
+                elapsed = latest_progress.get("elapsed_seconds", 0.0)
+                fraction = min(1.0, max(0.0, latest_progress.get("progress_fraction", 0.0)))
+                phase_slot.markdown(
+                    f"**{phase}** · {completed:,}/{total:,} tasks · {elapsed:.1f}s elapsed"
+                )
+                progress_slot.progress(fraction, text=f"{fraction:.0%} complete")
+                points = latest_progress.get("points", [])
+                if points:
+                    chart = go.Figure(go.Scatter(
+                        x=[point.get("elapsed_seconds", 0.0) for point in points],
+                        y=[point.get("completed_tasks", 0) for point in points],
+                        mode="lines+markers",
+                        name="Tasks completed",
+                        line={"color": "#36d6c5", "width": 3, "shape": "spline"},
+                        marker={"size": 7, "color": "#8a70ff"},
+                        fill="tozeroy",
+                        fillcolor="rgba(54, 214, 197, 0.12)",
+                        hovertemplate="%{x:.2f}s · %{y} tasks<extra></extra>",
+                    ))
+                    chart.update_layout(
+                        title="Live benchmark progress",
+                        xaxis_title="Elapsed time (seconds)",
+                        yaxis_title="Tasks completed",
+                        template="plotly_dark",
+                        height=360,
+                        margin={"l": 10, "r": 10, "t": 55, "b": 10},
+                        hovermode="x unified",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(12,17,31,0.65)",
+                    )
+                    chart_slot.plotly_chart(chart, use_container_width=True)
+                time.sleep(0.35)
+
+            runner.join()
+            try:
+                final_progress = client.experiment_progress(experiment_id)
+                if isinstance(final_progress, dict):
+                    latest_progress = final_progress
+            except Exception:
+                pass
+            st.session_state["last_progress"] = latest_progress
+            if "error" in outcome:
+                progress_status.update(label="Benchmark failed", state="error")
+                st.error(f"Benchmark request failed: {outcome['error']}")
+            else:
+                st.session_state["last_result"] = outcome["result"]
+                progress_status.update(label="Benchmark complete", state="complete")
     result = st.session_state.get("last_result")
     if result is not None:
-        values = st.columns(5)
+        values = st.columns(6)
         values[0].metric("Status", result.status.value)
         values[1].metric("Tasks", f"{result.successful_tasks}/{result.total_tasks}")
         values[2].metric("Duration", f"{result.duration_seconds:.3f}s")
         values[3].metric("Throughput", f"{result.throughput_tasks_per_sec:.2f} tasks/s")
         values[4].metric("Speedup", f"{result.speedup:.2f}x")
+        score = result.metrics_summary.get("benchmark_score")
+        values[5].metric("PyCoreMark points", f"{score['points']:.2f}" if score else "N/A")
         check = result.metrics_summary.get("consistency")
         if check and check.get("valid"):
             st.success(f"Sequential and distributed checksums match: `{check['distributed_checksum']}`")
         elif check:
             st.error("Distributed result differs from the sequential baseline.")
+        progress = st.session_state.get("last_progress")
+        if progress and progress.get("points"):
+            st.subheader("Task completion over time")
+            points = progress["points"]
+            result_chart = go.Figure(go.Scatter(
+                x=[point.get("elapsed_seconds", 0.0) for point in points],
+                y=[point.get("completed_tasks", 0) for point in points],
+                mode="lines+markers",
+                name="Tasks completed",
+                line={"color": "#36d6c5", "width": 3, "shape": "spline"},
+                marker={"size": 7, "color": "#8a70ff"},
+                fill="tozeroy",
+                fillcolor="rgba(54, 214, 197, 0.12)",
+                hovertemplate="%{x:.2f}s · %{y} tasks<extra></extra>",
+            ))
+            result_chart.update_layout(
+                title="Benchmark progress",
+                xaxis_title="Elapsed time (seconds)",
+                yaxis_title="Tasks completed",
+                template="plotly_dark",
+                height=360,
+                margin={"l": 10, "r": 10, "t": 55, "b": 10},
+                hovermode="x unified",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(12,17,31,0.65)",
+            )
+            st.plotly_chart(result_chart, use_container_width=True)
         with st.expander("Full calculation inputs, trace, and workload output"):
             st.json(result.metrics_summary)
 
@@ -208,6 +329,7 @@ with compare_tab:
                 "Workload": inputs.get("workload", "unknown"),
                 "Duration (s)": result.duration_seconds,
                 "Throughput (tasks/s)": result.throughput_tasks_per_sec,
+                "PyCoreMark points": result.metrics_summary.get("benchmark_score", {}).get("points"),
                 "Speedup": result.speedup,
                 "Efficiency": result.efficiency,
                 "Communication overhead (s)": result.communication_overhead_seconds,

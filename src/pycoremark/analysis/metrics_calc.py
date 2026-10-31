@@ -17,6 +17,24 @@ class ThroughputCalculator:
         return completed_tasks / total_duration_seconds
 
 
+class CPUScoreCalculator:
+    """Calculate the project-defined CPU score in PyCoreMark points.
+
+    One point represents processing 1,000 input integers per second in the
+    prime-count workload. The score is only comparable for equivalent inputs
+    and benchmark environments.
+    """
+
+    INPUT_NUMBERS_PER_POINT_SECOND = 1_000
+
+    @classmethod
+    def calculate(cls, processed_numbers: int, duration_seconds: float) -> float:
+        """Return thousands of processed input integers per second."""
+        if processed_numbers < 0 or duration_seconds <= 0:
+            return 0.0
+        return processed_numbers / duration_seconds / cls.INPUT_NUMBERS_PER_POINT_SECOND
+
+
 class SpeedupCalculator:
     """Calculates parallel speedup: S = T_baseline / T_parallel."""
 

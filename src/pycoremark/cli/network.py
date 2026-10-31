@@ -86,6 +86,7 @@ class NetworkCoordinatorRuntime:
             metrics_history_provider=self._metrics_history,
             history_provider=self._history_payload,
             experiment_handler=self._handle_experiment,
+            experiment_progress_provider=lambda experiment_id: self.controller.get_progress(experiment_id),
             auth_token=config.registration_auth_token,
             event_handler=self._record_event,
             events_provider=self._event_payload,

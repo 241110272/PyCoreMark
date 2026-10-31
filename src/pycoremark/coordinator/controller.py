@@ -84,6 +84,8 @@ class ExperimentController:
         self.result_timeout_seconds = result_timeout_seconds
         self.metrics_provider = metrics_provider or (lambda: [])
         self._run_lock = Lock()
+        self._progress_lock = Lock()
+        self._progress: dict[str, dict] = {}
         self._trace_manager = TraceManager()
         self.retry_manager = RetryManager(RetryPolicy(
             max_retries=3,
@@ -128,6 +130,103 @@ class ExperimentController:
                 publish(event_type, payload)
             except Exception:
                 logger.exception("Unable to publish experiment event")
+
+    def get_progress(self, experiment_id: str) -> dict | None:
+        """Return a snapshot of live experiment progress for dashboard polling."""
+        with self._progress_lock:
+            progress = self._progress.get(experiment_id)
+            if progress is None:
+                return None
+            return {
+                **{key: value for key, value in progress.items() if not key.startswith("_")},
+                "points": [dict(point) for point in progress["points"]],
+            }
+
+    def get_active_progress(self) -> dict | None:
+        """Return the newest running experiment snapshot, for local TUI polling."""
+        with self._progress_lock:
+            running = [
+                progress for progress in self._progress.values()
+                if progress.get("status") == "RUNNING"
+            ]
+            if not running:
+                return None
+            progress = max(running, key=lambda item: item["_started_monotonic"])
+            return {
+                **{key: value for key, value in progress.items() if not key.startswith("_")},
+                "points": [dict(point) for point in progress["points"]],
+            }
+
+    def _set_progress(
+        self,
+        experiment_id: str,
+        phase: str,
+        *,
+        completed: int = 0,
+        total: int = 0,
+        trial: int = 1,
+        trials: int = 1,
+        status: str = "RUNNING",
+        initialize: bool = False,
+    ) -> None:
+        with self._progress_lock:
+            if initialize or experiment_id not in self._progress:
+                if initialize and len(self._progress) >= 100:
+                    completed_runs = sorted(
+                        (
+                            (run_id, progress)
+                            for run_id, progress in self._progress.items()
+                            if progress.get("status") != "RUNNING"
+                        ),
+                        key=lambda item: item[1]["_started_monotonic"],
+                    )
+                    for run_id, _ in completed_runs[:len(self._progress) - 99]:
+                        self._progress.pop(run_id, None)
+                started = time.perf_counter()
+                self._progress[experiment_id] = {
+                    "experiment_id": experiment_id,
+                    "status": status,
+                    "phase": phase,
+                    "trial": trial,
+                    "trials": trials,
+                    "completed_tasks": 0,
+                    "total_tasks": 0,
+                    "progress_fraction": 0.0,
+                    "elapsed_seconds": 0.0,
+                    "points": [{
+                        "elapsed_seconds": 0.0,
+                        "completed_tasks": 0,
+                        "total_tasks": 0,
+                    }],
+                    "_started_monotonic": started,
+                }
+            progress = self._progress[experiment_id]
+            elapsed = max(0.0, time.perf_counter() - progress["_started_monotonic"])
+            safe_total = max(0, total)
+            safe_completed = min(max(0, completed), safe_total)
+            overall_total = safe_total * max(1, trials)
+            overall_completed = safe_total * max(0, trial - 1) + safe_completed
+            progress.update({
+                "status": status,
+                "phase": phase,
+                "trial": trial,
+                "trials": trials,
+                "completed_tasks": overall_completed,
+                "total_tasks": overall_total,
+                "progress_fraction": overall_completed / overall_total
+                if overall_total else 0.0,
+                "elapsed_seconds": elapsed,
+            })
+            point = {
+                "elapsed_seconds": round(elapsed, 4),
+                "completed_tasks": overall_completed,
+                "total_tasks": overall_total,
+            }
+            if progress["points"][-1] != point:
+                progress["points"].append(point)
+            # Avoid unbounded memory if a very large experiment reports many tasks.
+            if len(progress["points"]) > 2_000:
+                progress["points"] = progress["points"][::2]
 
     def _fail_task(self, task: Task, result: TaskResult) -> None:
         task.status = TaskStatus.FAILED
@@ -187,19 +286,57 @@ class ExperimentController:
             ExperimentResult with aggregated performance statistics.
         """
         with self._run_lock:
-            if config.repeat_count > 1:
-                return self._run_repeated(config)
-            return self._run_experiment(config)
+            self._set_progress(
+                config.experiment_id,
+                "Preparing benchmark",
+                trials=config.repeat_count,
+                initialize=True,
+            )
+            try:
+                if config.repeat_count > 1:
+                    result = self._run_repeated(config)
+                else:
+                    result = self._run_experiment(config)
+            except Exception:
+                self._set_progress(
+                    config.experiment_id, "Benchmark failed", status="FAILED"
+                )
+                raise
+            self._set_progress(
+                config.experiment_id,
+                "Benchmark complete" if result.status == ExperimentStatus.COMPLETED else "Benchmark failed",
+                completed=result.total_tasks // config.repeat_count,
+                total=result.total_tasks // config.repeat_count,
+                trial=config.repeat_count,
+                trials=config.repeat_count,
+                status=result.status.value,
+            )
+            return result
 
     def _run_repeated(self, config: ExperimentConfig) -> ExperimentResult:
         trial_results = []
         for trial_index in range(config.repeat_count):
+            previous = self.get_progress(config.experiment_id) or {}
+            tasks_per_trial = previous.get("total_tasks", 0) // config.repeat_count
             trial_config = replace(
                 config,
                 experiment_id=f"{config.experiment_id}-trial-{trial_index + 1}",
                 repeat_count=1,
             )
-            trial_results.append(self._run_experiment(trial_config))
+            self._set_progress(
+                config.experiment_id,
+                f"Starting trial {trial_index + 1}/{config.repeat_count}",
+                completed=tasks_per_trial if trial_index else 0,
+                total=tasks_per_trial,
+                trial=trial_index + 1,
+                trials=config.repeat_count,
+            )
+            trial_results.append(self._run_experiment(
+                trial_config,
+                progress_experiment_id=config.experiment_id,
+                progress_trial=trial_index + 1,
+                progress_trials=config.repeat_count,
+            ))
 
         def mean(attribute: str) -> float:
             return statistics.fmean(getattr(result, attribute) for result in trial_results)
@@ -240,6 +377,17 @@ class ExperimentController:
                     ),
                 },
                 "trial_ids": [result.experiment_id for result in trial_results],
+                **({
+                    "benchmark_score": {
+                        "name": "PyCoreMark CPU Points",
+                        "points": round(statistics.fmean(
+                            result.metrics_summary["benchmark_score"]["points"]
+                            for result in trial_results
+                        ), 2),
+                        "formula": "mean(trial processed_numbers / trial duration_seconds / 1000)",
+                        "unit_definition": "1 point = 1,000 input integers processed per second",
+                    }
+                } if all("benchmark_score" in result.metrics_summary for result in trial_results) else {}),
                 "trial_durations_seconds": [result.duration_seconds for result in trial_results],
                 "duration_stddev_seconds": statistics.pstdev(
                     result.duration_seconds for result in trial_results
@@ -275,7 +423,15 @@ class ExperimentController:
         self.experiment_repository.save_result(aggregate)
         return aggregate
 
-    def _run_experiment(self, config: ExperimentConfig) -> ExperimentResult:
+    def _run_experiment(
+        self,
+        config: ExperimentConfig,
+        *,
+        progress_experiment_id: str | None = None,
+        progress_trial: int = 1,
+        progress_trials: int = 1,
+    ) -> ExperimentResult:
+        progress_id = progress_experiment_id or config.experiment_id
         scheduler = self._scheduler_for(config.scheduler_type)
         logger.info("Starting experiment: %s (%s)", config.name, config.experiment_id)
         self._publish_event(
@@ -288,6 +444,13 @@ class ExperimentController:
         workload = self.workload_registry.create(config.workload)
         tasks = workload.generate_tasks()
         logger.info("Generated %d tasks for experiment %s", len(tasks), config.experiment_id)
+        self._set_progress(
+            progress_id,
+            "Preparing workers",
+            total=len(tasks),
+            trial=progress_trial,
+            trials=progress_trials,
+        )
 
         # 2. Get active nodes from cluster manager
         active_nodes = self.cluster_manager.get_active_nodes()
@@ -326,6 +489,15 @@ class ExperimentController:
                     },
                 },
             )
+            self._set_progress(
+                progress_id,
+                "No available workers",
+                completed=len(tasks),
+                total=len(tasks),
+                trial=progress_trial,
+                trials=progress_trials,
+                status="FAILED",
+            )
             self.experiment_repository.save_result(result)
             self._publish_event(
                 ClusterEventType.EXPERIMENT_COMPLETED,
@@ -347,6 +519,13 @@ class ExperimentController:
         expected_ids = {task.task_id for task in tasks}
         tasks_by_id = {task.task_id: task for task in tasks}
         self.aggregator.clear(expected_total=len(tasks))
+        self._set_progress(
+            progress_id,
+            "Dispatching tasks",
+            total=len(tasks),
+            trial=progress_trial,
+            trials=progress_trials,
+        )
         decisions = scheduler.schedule_batch(tasks, nodes)
         for task, decision in zip(tasks, decisions):
             if decision.target_node_id:
@@ -361,6 +540,14 @@ class ExperimentController:
                     )
                     self._fail_task(task, failed_result)
                     scheduler.release_task(task.task_id)
+                    self._set_progress(
+                        progress_id,
+                        "Processing tasks",
+                        completed=len(self.aggregator.get_all_results()),
+                        total=len(tasks),
+                        trial=progress_trial,
+                        trials=progress_trials,
+                    )
             else:
                 logger.warning("Task %s could not be scheduled", task.task_id)
 
@@ -371,6 +558,14 @@ class ExperimentController:
                     error_message=decision.reason or "No worker was available",
                 )
                 self._fail_task(task, failed_result)
+                self._set_progress(
+                    progress_id,
+                    "Processing tasks",
+                    completed=len(self.aggregator.get_all_results()),
+                    total=len(tasks),
+                    trial=progress_trial,
+                    trials=progress_trials,
+                )
 
         receive_result = getattr(self.dispatcher, "receive_result", None)
         deadline = time.monotonic() + (
@@ -395,6 +590,14 @@ class ExperimentController:
                     if task.task_id in first_failure_at:
                         recovery_times.append(time.monotonic() - first_failure_at[task.task_id])
                     self.aggregator.add_result(result)
+                    self._set_progress(
+                        progress_id,
+                        "Processing tasks",
+                        completed=len(self.aggregator.get_all_results()),
+                        total=len(tasks),
+                        trial=progress_trial,
+                        trials=progress_trials,
+                    )
                 scheduler.release_task(result.task_id)
 
             if self.aggregator.is_complete(len(tasks)):
@@ -419,11 +622,27 @@ class ExperimentController:
                     )
                     self._fail_task(task, failed_result)
                     scheduler.release_task(task_id)
+                    self._set_progress(
+                        progress_id,
+                        "Processing tasks",
+                        completed=len(self.aggregator.get_all_results()),
+                        total=len(tasks),
+                        trial=progress_trial,
+                        trials=progress_trials,
+                    )
             if retried:
                 deadline = time.monotonic() + self.result_timeout_seconds
                 continue
 
         duration = time.perf_counter() - wall_started
+        self._set_progress(
+            progress_id,
+            "Validating results",
+            completed=len(self.aggregator.get_all_results()),
+            total=len(tasks),
+            trial=progress_trial,
+            trials=progress_trials,
+        )
         results = self.aggregator.get_all_results()
         actual_workers = len({r.worker_id for r in results if r.status == TaskStatus.COMPLETED})
         analysis = self.analyzer.analyze(

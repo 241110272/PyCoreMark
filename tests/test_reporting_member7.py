@@ -28,6 +28,7 @@ def sample_result():
         efficiency=0.5,
         average_latency_seconds=0.1,
         communication_overhead_seconds=0.2,
+        metrics_summary={"benchmark_score": {"points": 1.25}},
     )
 
 
@@ -44,12 +45,14 @@ def test_csv_exporter():
     assert "experiment_id" in output
     assert "EXP-001" in output
     assert "throughput_tasks_per_sec" in output
+    assert "benchmark_score_points" in output
 
 
 def test_markdown_exporter():
     output = MarkdownExporter().export([sample_result()])
     assert "Experiment ID" in output
     assert "EXP-001" in output
+    assert "PyCoreMark Points" in output
     assert "100" in output
 
 

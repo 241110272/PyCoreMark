@@ -9,6 +9,8 @@ import multiprocessing
 import time
 from typing import Iterable
 
+from pycoremark.analysis.metrics_calc import CPUScoreCalculator
+
 
 @dataclass(frozen=True)
 class CoreScalingSample:
@@ -20,6 +22,7 @@ class CoreScalingSample:
     rounds_completed: int
     tasks_completed: int
     throughput_tasks_per_second: float
+    score_points: float
     speedup: float
     efficiency: float
     processed_numbers: int
@@ -180,6 +183,7 @@ def benchmark_cpu_scaling(
                 f"{workers}-worker output does not match the sequential checksum"
             )
         tasks_completed = rounds * task_count
+        processed_numbers = rounds * total_numbers
         throughput = tasks_completed / max(elapsed, 1e-12)
         if workers == 1:
             single_core_throughput = throughput
@@ -193,9 +197,12 @@ def benchmark_cpu_scaling(
             rounds_completed=rounds,
             tasks_completed=tasks_completed,
             throughput_tasks_per_second=throughput,
+            score_points=round(
+                CPUScoreCalculator.calculate(processed_numbers, elapsed), 2
+            ),
             speedup=speedup,
             efficiency=speedup / workers,
-            processed_numbers=rounds * total_numbers,
+            processed_numbers=processed_numbers,
             prime_count_per_round=expected["prime_count"],
             prime_sum_per_round=expected["prime_sum"],
             expected_checksum=expected_checksum,

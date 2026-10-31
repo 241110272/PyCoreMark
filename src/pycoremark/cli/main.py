@@ -148,14 +148,15 @@ def main(argv: list[str] | None = None) -> int:
                 f"Consistency: {'PASS' if report.consistency_valid else 'FAIL'}; "
                 f"{report.test_numbers:,} integers per round; target {args.duration:.2f}s/sample"
             )
-            print("workers  seconds  rounds  tasks/s    speedup  efficiency  checksum")
+            print("workers  seconds  rounds  tasks/s    points  speedup  efficiency  checksum")
             for sample in report.samples:
                 print(
                     f"{sample.workers:>7}  {sample.actual_duration_seconds:>7.2f}  "
                     f"{sample.rounds_completed:>6}  {sample.throughput_tasks_per_second:>8.2f}  "
-                    f"{sample.speedup:>7.2f}x  {sample.efficiency:>9.1%}  "
+                    f"{sample.score_points:>8.2f}  {sample.speedup:>7.2f}x  {sample.efficiency:>9.1%}  "
                     f"{sample.expected_checksum[:12]}"
                 )
+            print("points = 1,000 input integers/s; compare the same CPU profile.")
         return 0 if report.consistency_valid else 1
     if command == "report":
         if args.limit < 1:
@@ -289,6 +290,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"{result.throughput_tasks_per_sec:.2f} tasks/s; "
                 f"speedup {result.speedup:.2f}x; efficiency {result.efficiency:.1%}"
             )
+            score = result.metrics_summary.get("benchmark_score")
+            if score:
+                print(
+                    f"PyCoreMark CPU score: {score['points']:.2f} points "
+                    "(1 point = 1,000 input integers/s)"
+                )
             if result.failed_tasks:
                 print(f"{result.failed_tasks} tasks failed; inspect persisted run details.")
             if result.metrics_summary:

@@ -38,6 +38,7 @@ class FastAPIClusterServer:
         metrics_history_provider=None,
         history_provider=None,
         experiment_handler=None,
+        experiment_progress_provider=None,
         auth_token: str | None = None,
         event_handler=None,
         events_provider=None,
@@ -52,6 +53,7 @@ class FastAPIClusterServer:
         self._metrics_history_provider = metrics_history_provider or (lambda: [])
         self._history_provider = history_provider or (lambda: [])
         self._experiment_handler = experiment_handler
+        self._experiment_progress_provider = experiment_progress_provider or (lambda experiment_id: None)
         self._event_handler = event_handler or (lambda event: None)
         self._events_provider = events_provider or (lambda: [])
         self._node_event_handler = node_event_handler or (lambda event_type, node_id: None)
@@ -209,6 +211,13 @@ class FastAPIClusterServer:
                 return self._experiment_handler(payload)
             except Exception as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        @self.app.get("/api/experiments/{experiment_id}/progress", dependencies=auth)
+        def experiment_progress(experiment_id: str) -> dict:
+            progress = self._experiment_progress_provider(experiment_id)
+            if progress is None:
+                raise HTTPException(status_code=404, detail="experiment progress not found")
+            return progress
 
     @property
     def address(self) -> tuple[str, int]:

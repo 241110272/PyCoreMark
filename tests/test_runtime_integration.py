@@ -73,10 +73,19 @@ def test_local_runtime_executes_and_collects_workload_results(tmp_path: Path) ->
         assert result.status.value == "COMPLETED", result.metrics_summary
         assert result.successful_tasks == 4
         assert result.metrics_summary["workload"]["processed_numbers"] == 200
+        assert result.metrics_summary["benchmark_score"]["points"] > 0
+        assert result.metrics_summary["benchmark_score"]["processed_numbers"] == 200
+        assert result.metrics_summary["benchmark_score"]["points"] == round(
+            200 / result.duration_seconds / 1_000, 2
+        )
         assert result.metrics_summary["consistency"]["valid"] is True
         assert result.metrics_summary["calculation_inputs"]["baseline_single_node_duration_seconds"] > 0
         assert "p95" in result.metrics_summary["task_latency_seconds"]
         assert result.duration_seconds > 0
+        progress = runtime.controller.get_progress(result.experiment_id)
+        assert progress["status"] == "COMPLETED"
+        assert progress["completed_tasks"] == progress["total_tasks"] == 4
+        assert progress["points"][-1]["completed_tasks"] == 4
     finally:
         runtime.stop()
 
@@ -152,8 +161,11 @@ def test_repeated_static_trials_preserve_checksum_and_trial_data(tmp_path: Path)
         assert result.status.value == "COMPLETED"
         assert result.total_tasks == 4
         assert result.metrics_summary["repeat_count"] == 2
+        assert result.metrics_summary["benchmark_score"]["points"] > 0
         assert result.metrics_summary["consistency"]["valid"] is True
         assert len(result.metrics_summary["trial_ids"]) == 2
+        progress = runtime.controller.get_progress(result.experiment_id)
+        assert progress["completed_tasks"] == progress["total_tasks"] == 4
     finally:
         runtime.stop()
 
@@ -196,6 +208,7 @@ def test_fixed_window_single_vs_multi_core_output_consistency() -> None:
         for sample in report.samples
     )
     assert all(sample.output_matches_sequential for sample in report.samples)
+    assert all(sample.score_points > 0 for sample in report.samples)
     assert report.samples[0].expected_checksum == report.samples[1].expected_checksum
 
 
@@ -281,11 +294,16 @@ def test_http_coordinator_runs_a_separate_worker_process(tmp_path: Path) -> None
         worker.start()
         client = HTTPClusterClient(f"http://127.0.0.1:{port}")
         result = client.run_experiment(
-            workload="cpu", nodes=1, tasks=2, complexity=20
+            workload="cpu", nodes=1, tasks=2, complexity=20,
+            experiment_id="dashboard-progress-check",
         )
         assert result.status.value == "COMPLETED"
         assert result.successful_tasks == 2
         assert result.metrics_summary["workload"]["processed_numbers"] == 40
+        progress = client.experiment_progress("dashboard-progress-check")
+        assert progress["status"] == "COMPLETED"
+        assert progress["completed_tasks"] == progress["total_tasks"] == 2
+        assert progress["points"][-1]["completed_tasks"] == 2
         assert client.status()["total_nodes"] == 1
         assert client.history()[0].experiment_id == result.experiment_id
     finally:

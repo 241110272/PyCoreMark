@@ -36,6 +36,7 @@ class BaseExporter(ABC):
 
 def _result_to_dict(result: ExperimentResult) -> dict:
     """Convert an experiment result into a serializable dictionary."""
+    benchmark_score = result.metrics_summary.get("benchmark_score", {}).get("points")
     return {
         "experiment_id": result.experiment_id,
         "status": result.status.value,
@@ -44,6 +45,7 @@ def _result_to_dict(result: ExperimentResult) -> dict:
         "failed_tasks": result.failed_tasks,
         "duration_seconds": result.duration_seconds,
         "throughput_tasks_per_sec": result.throughput_tasks_per_sec,
+        "benchmark_score_points": benchmark_score,
         "speedup": result.speedup,
         "efficiency": result.efficiency,
         "average_latency_seconds": result.average_latency_seconds,
@@ -78,6 +80,7 @@ class CSVExporter(BaseExporter):
             "failed_tasks",
             "duration_seconds",
             "throughput_tasks_per_sec",
+            "benchmark_score_points",
             "speedup",
             "efficiency",
             "average_latency_seconds",
@@ -112,6 +115,7 @@ class MarkdownExporter(BaseExporter):
             ("failed_tasks", "Failed Tasks"),
             ("duration_seconds", "Duration (s)"),
             ("throughput_tasks_per_sec", "Throughput (tasks/s)"),
+            ("benchmark_score_points", "PyCoreMark Points"),
             ("speedup", "Speedup"),
             ("efficiency", "Efficiency"),
             ("average_latency_seconds", "Average Latency (s)"),
@@ -150,6 +154,7 @@ class HTMLExporter(BaseExporter):
             ("failed_tasks", "Failed Tasks"),
             ("duration_seconds", "Duration (s)"),
             ("throughput_tasks_per_sec", "Throughput (tasks/s)"),
+            ("benchmark_score_points", "PyCoreMark Points"),
             ("speedup", "Speedup"),
             ("efficiency", "Efficiency"),
             ("average_latency_seconds", "Average Latency (s)"),

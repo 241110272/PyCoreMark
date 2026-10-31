@@ -271,6 +271,7 @@ class HTTPClusterServer:
         metrics_history_provider=None,
         history_provider=None,
         experiment_handler=None,
+        experiment_progress_provider=None,
         auth_token: str | None = None,
         event_handler=None,
         events_provider=None,
@@ -283,6 +284,7 @@ class HTTPClusterServer:
         self._metrics_history_provider = metrics_history_provider or (lambda: [])
         self._history_provider = history_provider or (lambda: [])
         self._experiment_handler = experiment_handler
+        self._experiment_progress_provider = experiment_progress_provider or (lambda experiment_id: None)
         self._auth_token = auth_token
         self._event_handler = event_handler or (lambda event: None)
         self._events_provider = events_provider or (lambda: [])
@@ -337,6 +339,14 @@ class HTTPClusterServer:
                     return
                 if parsed.path == "/api/history":
                     self._send(200, owner._history_provider())
+                    return
+                if parsed.path.startswith("/api/experiments/") and parsed.path.endswith("/progress"):
+                    experiment_id = parsed.path.removeprefix("/api/experiments/").removesuffix("/progress").strip("/")
+                    progress = owner._experiment_progress_provider(experiment_id)
+                    if progress is None:
+                        self._send(404, {"error": "experiment progress not found"})
+                    else:
+                        self._send(200, progress)
                     return
                 if parsed.path == "/api/events":
                     self._send(200, owner._events_provider())
@@ -577,10 +587,17 @@ class HTTPClusterClient:
     def events(self):
         return self.request("GET", "/api/events", timeout=1.0) or []
 
+    def experiment_progress(self, experiment_id: str):
+        from urllib.parse import quote
+        return self.request(
+            "GET", f"/api/experiments/{quote(experiment_id, safe='')}/progress", timeout=2.0
+        )
+
     def run_experiment(self, *, workload: str, nodes: int, tasks: int = 8,
                        complexity: int = 25000, records: int = 1000,
                        scheduler_type: str = "DYNAMIC", repeat_count: int = 1,
                        dataset_path: str | None = None, output_dir: str | None = None,
+                       experiment_id: str | None = None,
                        result_url: str | None = None, network_timeout: float = 10.0):
         from pycoremark.analysis.baseline import run_sequential_baseline
         from pycoremark.models.workload import WorkloadConfig, WorkloadType
@@ -643,7 +660,7 @@ class HTTPClusterClient:
                 parameters=params,
             ))
         payload = {
-            "experiment_id": f"{workload_type}-{threading.get_ident()}-{int(datetime.now().timestamp() * 1000)}",
+            "experiment_id": experiment_id or f"{workload_type}-{threading.get_ident()}-{int(datetime.now().timestamp() * 1000)}",
             "name": experiment_name,
             "workload": workload_config,
             "target_nodes": nodes,

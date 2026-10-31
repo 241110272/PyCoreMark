@@ -5,6 +5,7 @@ from math import ceil
 from typing import List
 
 from pycoremark.analysis.metrics_calc import (
+    CPUScoreCalculator,
     EfficiencyCalculator,
     LoadBalanceCalculator,
     SpeedupCalculator,
@@ -53,6 +54,15 @@ class PerformanceAnalyzer:
         ]
         successful_tasks = len(completed_results)
         failed_tasks = total_tasks - successful_tasks
+
+        processed_numbers = 0
+        if config.workload.name == "cpu_benchmark":
+            processed_numbers = sum(
+                int(result.output_data.get("processed_numbers", 0))
+                for result in completed_results
+                if isinstance(result.output_data, dict)
+            )
+        cpu_score = CPUScoreCalculator.calculate(processed_numbers, duration_seconds)
 
         throughput = self.throughput_calc.calculate(successful_tasks, duration_seconds)
         speedup = self.speedup_calc.calculate(
@@ -105,6 +115,42 @@ class PerformanceAnalyzer:
             else ExperimentStatus.FAILED
         )
 
+        metrics_summary = {
+            "calculation_inputs": {
+                "scheduler_type": config.scheduler_type,
+                "workload": config.workload.name,
+                "target_nodes": config.target_nodes,
+                "repeat_count": config.repeat_count,
+                "baseline_single_node_duration_seconds": baseline_single_node_duration,
+                "parallel_wall_duration_seconds": duration_seconds,
+                "workers_that_completed_tasks": worker_count,
+                "task_load_imbalance_ratio": round(load_imbalance, 4),
+            },
+            "task_latency_seconds": {
+                "p50": percentile(0.50),
+                "p95": percentile(0.95),
+                "p99": percentile(0.99),
+            },
+            "queue_wait_seconds": {
+                "average": round(sum(queue_waits) / len(queue_waits), 6)
+                if queue_waits else 0.0,
+                "p95": round(
+                    queue_waits[max(0, ceil(0.95 * len(queue_waits)) - 1)], 6
+                ) if queue_waits else 0.0,
+            },
+        }
+        if config.workload.name == "cpu_benchmark":
+            metrics_summary["benchmark_score"] = {
+                "name": "PyCoreMark CPU Points",
+                "points": round(cpu_score, 2),
+                "processed_numbers": processed_numbers,
+                "processed_numbers_per_second": round(
+                    processed_numbers / duration_seconds, 2
+                ) if duration_seconds > 0 else 0.0,
+                "formula": "processed_numbers / duration_seconds / 1000",
+                "unit_definition": "1 point = 1,000 input integers processed per second",
+            }
+
         return ExperimentResult(
             experiment_id=config.experiment_id,
             status=status,
@@ -118,28 +164,5 @@ class PerformanceAnalyzer:
             efficiency=round(efficiency, 2),
             average_latency_seconds=round(avg_latency, 6),
             communication_overhead_seconds=overhead,
-            metrics_summary={
-                "calculation_inputs": {
-                    "scheduler_type": config.scheduler_type,
-                    "workload": config.workload.name,
-                    "target_nodes": config.target_nodes,
-                    "repeat_count": config.repeat_count,
-                    "baseline_single_node_duration_seconds": baseline_single_node_duration,
-                    "parallel_wall_duration_seconds": duration_seconds,
-                "workers_that_completed_tasks": worker_count,
-                "task_load_imbalance_ratio": round(load_imbalance, 4),
-                },
-                "task_latency_seconds": {
-                    "p50": percentile(0.50),
-                    "p95": percentile(0.95),
-                    "p99": percentile(0.99),
-                },
-                "queue_wait_seconds": {
-                    "average": round(sum(queue_waits) / len(queue_waits), 6)
-                    if queue_waits else 0.0,
-                    "p95": round(
-                        queue_waits[max(0, ceil(0.95 * len(queue_waits)) - 1)], 6
-                    ) if queue_waits else 0.0,
-                },
-            },
+            metrics_summary=metrics_summary,
         )
