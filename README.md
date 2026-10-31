@@ -95,8 +95,18 @@ kontrak bersama lintas modul, bukan sebagai implementasi terisolasi.
 Gunakan Python 3.11+.
 
 ```powershell
+# Create and activate a project environment (recommended)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Install the package and development/test dependencies into that same Python
 python -m pip install -e ".[dev]"
 ```
+
+PyCoreMark uses a `src/` package layout, so install it before running commands
+from a fresh checkout. Keep the environment active (or use that environment's
+Python executable) for every `python -m pycoremark` command; otherwise Python
+may report `No module named pycoremark`.
 
 ### Mode lokal
 
@@ -122,7 +132,8 @@ python -m pycoremark report --format detailed-json --output report.json
 ```
 
 Jika perintah console `pycoremark` belum ada di `PATH`, gunakan
-`python -m pycoremark`.
+`python -m pycoremark` dari environment yang sudah diaktifkan. Tanpa environment
+virtual, jalankan `.\.venv\Scripts\python.exe -m pycoremark`.
 
 ### Mode Docker Compose
 
