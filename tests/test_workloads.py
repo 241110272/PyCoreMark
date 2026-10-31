@@ -87,6 +87,9 @@ def test_mixed_real_file_hash_and_http_failure(tmp_path):
         results = [workload.execute_task(task) for task in tasks]
         assert received == results
         assert sum(result["processed_records"] for result in results) == 3
+        reduced = workload.aggregate_results(results)
+        assert reduced == workload.aggregate_results(results[::-1])
+        assert reduced["processed_records"] == 3
         output = tmp_path / "outputs" / (hashlib.sha256(tasks[0].task_id.encode()).hexdigest() + ".jsonl")
         data = output.read_bytes()
         first = json.loads(data.splitlines()[0])

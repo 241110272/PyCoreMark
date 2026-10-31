@@ -12,6 +12,8 @@ from pycoremark.storage.memory import (
     InMemoryNodeRepository,
     InMemoryTaskRepository,
 )
+from pycoremark.storage.sqlite import SQLiteExperimentRepository
+from pycoremark.storage.benchmark import StorageBenchmarkResult, benchmark_storage
 
 __all__ = [
     "ExperimentRepository",
@@ -22,5 +24,8 @@ __all__ = [
     "InMemoryNodeRepository",
     "InMemoryTaskRepository",
     "InMemoryMetricsRepository",
+    "SQLiteExperimentRepository",
+    "StorageBenchmarkResult",
+    "benchmark_storage",
 ]
 

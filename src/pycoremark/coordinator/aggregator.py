@@ -26,6 +26,14 @@ class ResultAggregator:
         with self._lock:
             self._expected_total = expected_total
 
+    def clear(self, expected_total: Optional[int] = None) -> None:
+        """Start a fresh collection window for the next experiment."""
+        if expected_total is not None and expected_total < 0:
+            raise ValueError("expected_total must be non-negative")
+        with self._lock:
+            self._results.clear()
+            self._expected_total = expected_total
+
     def add_progress_callback(self, callback: ProgressCallback) -> None:
         if not callable(callback):
             raise TypeError("callback must be callable")
@@ -38,8 +46,11 @@ class ResultAggregator:
             if callback in self._callbacks:
                 self._callbacks.remove(callback)
 
-    def add_result(self, result: TaskResult) -> None:
+    def add_result(self, result: TaskResult) -> bool:
+        """Accept the first result for a task and reject duplicate deliveries."""
         with self._lock:
+            if result.task_id in self._results:
+                return False
             self._results[result.task_id] = result
             count = len(self._results)
             expected = self._expected_total
@@ -52,6 +63,7 @@ class ResultAggregator:
             except Exception:
                 # A monitoring callback must not break result aggregation.
                 continue
+        return True
 
     def get_result(self, task_id: str) -> Optional[TaskResult]:
         with self._lock:

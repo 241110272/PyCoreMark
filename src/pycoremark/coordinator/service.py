@@ -1,6 +1,6 @@
-"""Coordinator service main runtime hosting coordination components.
+"""Coordinator facade for registration, heartbeats, and experiment requests.
 
-TODO(Member 7): Add REST / gRPC API server for remote dashboard commands.
+The networked FastAPI/gRPC runtime is composed in ``pycoremark.cli.network``.
 """
 
 from pycoremark.cluster.manager import ClusterManager

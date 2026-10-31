@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package pycoremark;
+
+import "google/protobuf/struct.proto";
+
+// JSON-shaped protobuf messages keep Python DTOs versioned independently.
+service ClusterControl {
+  rpc HealthCheck(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc IssueChallenge(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc RegisterNode(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc DeregisterNode(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc Heartbeat(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc PublishMetrics(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc PublishEvent(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc SubmitResult(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc GetTask(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc GetNode(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc CancelTask(google.protobuf.Struct) returns (google.protobuf.Struct);
+}

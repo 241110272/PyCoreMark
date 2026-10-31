@@ -3,12 +3,26 @@
 
 from abc import ABC, abstractmethod
 import csv
+from dataclasses import asdict, is_dataclass
 import html
 import io
 import json
+from pathlib import Path
 from typing import List
 
 from pycoremark.models.experiment import ExperimentResult
+
+
+def _json_default(value):
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, Path):
+        return str(value)
+    if hasattr(value, "value"):
+        return value.value
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    raise TypeError(f"Cannot export {type(value).__name__}")
 
 
 class BaseExporter(ABC):
@@ -34,6 +48,9 @@ def _result_to_dict(result: ExperimentResult) -> dict:
         "efficiency": result.efficiency,
         "average_latency_seconds": result.average_latency_seconds,
         "communication_overhead_seconds": result.communication_overhead_seconds,
+        "start_time": result.start_time.isoformat(),
+        "end_time": result.end_time.isoformat() if result.end_time else None,
+        "metrics_summary": result.metrics_summary,
     }
 
 
@@ -44,6 +61,7 @@ class JSONExporter(BaseExporter):
         return json.dumps(
             [_result_to_dict(result) for result in results],
             indent=2,
+            default=_json_default,
         )
 
 
@@ -52,7 +70,6 @@ class CSVExporter(BaseExporter):
 
     def export(self, results: List[ExperimentResult]) -> str:
         output = io.StringIO()
-        fieldnames = list(_result_to_dict.__annotations__)  # Replaced below.
         fieldnames = [
             "experiment_id",
             "status",
@@ -65,12 +82,20 @@ class CSVExporter(BaseExporter):
             "efficiency",
             "average_latency_seconds",
             "communication_overhead_seconds",
+            "start_time",
+            "end_time",
+            "metrics_summary",
         ]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
 
         for result in results:
-            writer.writerow(_result_to_dict(result))
+            row = _result_to_dict(result)
+            row["metrics_summary"] = json.dumps(
+                row["metrics_summary"], ensure_ascii=False, sort_keys=True,
+                default=_json_default,
+            )
+            writer.writerow(row)
 
         return output.getvalue()
 

@@ -15,9 +15,14 @@ class ClusterConfig:
 
     coordinator_host: str = "127.0.0.1"
     coordinator_port: int = 8000
+    grpc_port: int = 50051
+    transport: str = "grpc"
     worker_id: str = "worker-0"
     worker_cores: int = 4
     worker_memory_mb: int = 4096
+    worker_failure_rate: float = 0.0
+    simulated_network_delay_ms: float = 0.0
+    network_failure_rate: float = 0.0
     broker_url: str = "memory://"
     database_url: str = "sqlite:///pycoremark.db"
     heartbeat_interval: float = 2.0
@@ -34,6 +39,7 @@ class ClusterConfig:
             "broker_url",
             "database_url",
             "log_level",
+            "transport",
         )
 
         for name in string_fields:
@@ -46,6 +52,7 @@ class ClusterConfig:
 
         integer_fields = (
             "coordinator_port",
+            "grpc_port",
             "worker_cores",
             "worker_memory_mb",
             "max_retries",
@@ -61,6 +68,13 @@ class ClusterConfig:
             raise ValueError(
                 "coordinator_port must be between 1 and 65535."
             )
+        if not 1 <= self.grpc_port <= 65535:
+            raise ValueError("grpc_port must be between 1 and 65535.")
+
+        normalized_transport = self.transport.lower()
+        if normalized_transport not in {"grpc", "http"}:
+            raise ValueError("transport must be either 'grpc' or 'http'.")
+        object.__setattr__(self, "transport", normalized_transport)
 
         if self.worker_cores <= 0:
             raise ValueError("worker_cores must be positive.")
@@ -89,6 +103,22 @@ class ClusterConfig:
                 raise ValueError(
                     f"{name} must be a positive finite number."
                 )
+
+        for name in (
+            "worker_failure_rate", "simulated_network_delay_ms", "network_failure_rate"
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(f"{name} must be a finite nonnegative number.")
+        if self.worker_failure_rate > 1:
+            raise ValueError("worker_failure_rate must be in [0, 1].")
+        if self.network_failure_rate > 1:
+            raise ValueError("network_failure_rate must be in [0, 1].")
 
         allowed_log_levels = {
             "DEBUG",
@@ -215,6 +245,8 @@ def load_config_from_env() -> ClusterConfig:
         raw_value = os.getenv(environment_name)
 
         if raw_value is None:
+            continue
+        if name == "registration_auth_token" and not raw_value.strip():
             continue
 
         try:

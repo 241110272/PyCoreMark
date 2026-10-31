@@ -1,7 +1,4 @@
-"""Dashboard facade service providing API endpoints for UI clients.
-
-TODO(Member 7): Integrate FastAPI / Flask / Streamlit web front-end.
-"""
+"""Dashboard query facade used by terminal/web UI clients."""
 
 from typing import Any, Dict, List
 from pycoremark.common.logging import get_logger

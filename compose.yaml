@@ -1,61 +1,85 @@
 services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - redis-data:/data
+    networks: [cluster-net]
+
   coordinator:
     build: .
-    command: ["pycoremark-coordinator"]
+    command: ["python", "-m", "pycoremark", "coordinator"]
     environment:
-      - PYCOREMARK_COORDINATOR_HOST=0.0.0.0
-      - PYCOREMARK_COORDINATOR_PORT=8000
-      - PYCOREMARK_LOG_LEVEL=INFO
+      PYCOREMARK_COORDINATOR_HOST: 0.0.0.0
+      PYCOREMARK_COORDINATOR_PORT: 8000
+      PYCOREMARK_GRPC_PORT: 50051
+      PYCOREMARK_BROKER_URL: redis://redis:6379/0
+      PYCOREMARK_DATABASE_URL: sqlite:///data/pycoremark.sqlite3
+      PYCOREMARK_REGISTRATION_AUTH_TOKEN: ${PYCOREMARK_REGISTRATION_AUTH_TOKEN:-}
+      PYCOREMARK_LOG_LEVEL: INFO
     ports:
       - "8000:8000"
-    networks:
-      - cluster-net
-
-  worker-1:
-    build: .
-    command: ["pycoremark-worker"]
-    environment:
-      - PYCOREMARK_WORKER_ID=worker-1
-      - PYCOREMARK_COORDINATOR_HOST=coordinator
-      - PYCOREMARK_COORDINATOR_PORT=8000
-      - PYCOREMARK_WORKER_CORES=2
-      - PYCOREMARK_WORKER_MEMORY_MB=2048
-      - PYCOREMARK_LOG_LEVEL=INFO
+      - "50051:50051"
+    volumes:
+      - coordinator-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
     depends_on:
-      - coordinator
-    networks:
-      - cluster-net
+      redis:
+        condition: service_healthy
+    networks: [cluster-net]
 
-  worker-2:
+  worker:
     build: .
-    command: ["pycoremark-worker"]
+    command: ["python", "-m", "pycoremark", "worker"]
     environment:
-      - PYCOREMARK_WORKER_ID=worker-2
-      - PYCOREMARK_COORDINATOR_HOST=coordinator
-      - PYCOREMARK_COORDINATOR_PORT=8000
-      - PYCOREMARK_WORKER_CORES=2
-      - PYCOREMARK_WORKER_MEMORY_MB=2048
-      - PYCOREMARK_LOG_LEVEL=INFO
+      PYCOREMARK_WORKER_ID: auto
+      PYCOREMARK_COORDINATOR_HOST: coordinator
+      PYCOREMARK_COORDINATOR_PORT: 8000
+      PYCOREMARK_GRPC_PORT: 50051
+      PYCOREMARK_TRANSPORT: grpc
+      PYCOREMARK_BROKER_URL: redis://redis:6379/0
+      PYCOREMARK_WORKER_CORES: 2
+      PYCOREMARK_WORKER_MEMORY_MB: 2048
+      PYCOREMARK_WORKER_FAILURE_RATE: ${PYCOREMARK_WORKER_FAILURE_RATE:-0}
+      PYCOREMARK_SIMULATED_NETWORK_DELAY_MS: ${PYCOREMARK_SIMULATED_NETWORK_DELAY_MS:-0}
+      PYCOREMARK_NETWORK_FAILURE_RATE: ${PYCOREMARK_NETWORK_FAILURE_RATE:-0}
+      PYCOREMARK_REGISTRATION_AUTH_TOKEN: ${PYCOREMARK_REGISTRATION_AUTH_TOKEN:-}
+      PYCOREMARK_LOG_LEVEL: INFO
     depends_on:
-      - coordinator
-    networks:
-      - cluster-net
+      coordinator:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [cluster-net]
 
   dashboard:
     build: .
-    command: ["pycoremark-dashboard"]
+    command:
+      ["python", "-m", "streamlit", "run", "src/pycoremark/dashboard/web.py",
+       "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
     environment:
-      - PYCOREMARK_COORDINATOR_HOST=coordinator
-      - PYCOREMARK_COORDINATOR_PORT=8000
-      - PYCOREMARK_LOG_LEVEL=INFO
+      PYCOREMARK_COORDINATOR_URL: http://coordinator:8000
+      PYCOREMARK_REGISTRATION_AUTH_TOKEN: ${PYCOREMARK_REGISTRATION_AUTH_TOKEN:-}
     ports:
-      - "8080:8080"
+      - "8501:8501"
     depends_on:
-      - coordinator
-    networks:
-      - cluster-net
+      coordinator:
+        condition: service_healthy
+    networks: [cluster-net]
 
 networks:
   cluster-net:
     driver: bridge
 
+volumes:
+  coordinator-data:
+  redis-data:

@@ -269,7 +269,7 @@ class FailureDetector:
 
                 if len(intervals) < self._min_samples:
                     if elapsed >= self._timeout_seconds:
-                        target_status = NodeStatus.DEAD
+                        target_status = NodeStatus.OFFLINE
                     elif elapsed >= self._timeout_seconds / 2:
                         target_status = NodeStatus.SUSPECTED
                     else:
@@ -278,7 +278,7 @@ class FailureDetector:
                     phi = self._calculate_phi(elapsed, intervals)
 
                     if phi >= self._phi_threshold:
-                        target_status = NodeStatus.DEAD
+                        target_status = NodeStatus.OFFLINE
                     elif phi >= self._suspect_threshold:
                         target_status = NodeStatus.SUSPECTED
                     else:
@@ -304,7 +304,7 @@ class FailureDetector:
                 )
 
                 if (
-                    target_status == NodeStatus.DEAD
+                    target_status == NodeStatus.OFFLINE
                     and self._event_publisher is not None
                 ):
                     pending_events.append(

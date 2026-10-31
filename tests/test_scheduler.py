@@ -58,6 +58,11 @@ def test_dynamic_scheduler_distribution() -> None:
     assert d1.target_node_id == "node-1"
     assert d2.target_node_id == "node-2"
 
+    impossible = Task(
+        task_id="t-too-large", workload_name="dummy", payload={}, required_cores=10
+    )
+    assert scheduler.schedule(impossible, nodes).target_node_id is None
+
 
 def test_resource_aware_scheduler() -> None:
     """Verify resource constraint matching."""

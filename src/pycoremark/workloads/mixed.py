@@ -73,3 +73,15 @@ class MixedWorkload(BaseWorkload):
             if not 200 <= response.status < 300:
                 raise OSError(f"Result endpoint rejected task: HTTP {response.status}")
         return summary
+
+    @staticmethod
+    def aggregate_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Reduce content-derived checksums, ignoring per-run IDs and local paths."""
+        checksums = sorted(result["checksum"] for result in results)
+        combined = hashlib.sha256("".join(checksums).encode("ascii")).hexdigest()
+        return {
+            "processed_records": sum(result["processed_records"] for result in results),
+            "output_bytes": sum(result["output_bytes"] for result in results),
+            "partition_checksums": checksums,
+            "checksum": combined,
+        }

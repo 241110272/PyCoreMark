@@ -54,6 +54,10 @@ class ResultValidator:
                 f"{result.failed_tasks} tasks encountered execution failure."
             )
 
+        consistency = result.metrics_summary.get("consistency")
+        if consistency is not None and consistency.get("valid") is False:
+            errors.append("Distributed result does not match the sequential baseline checksum.")
+
         # Validate numeric metrics.
         numeric_metrics = {
             "duration": result.duration_seconds,
@@ -96,4 +100,12 @@ class ResultValidator:
             is_valid=(len(errors) == 0),
             errors=errors,
             warnings=warnings,
+            metadata={
+                "total_tasks": result.total_tasks,
+                "completed_tasks": result.successful_tasks,
+                "permanently_failed_tasks": result.failed_tasks,
+                "unfinished_tasks": max(
+                    0, result.total_tasks - result.successful_tasks - result.failed_tasks
+                ),
+            },
         )

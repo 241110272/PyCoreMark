@@ -1,41 +1,54 @@
-"""Node-level telemetry metric collector.
-
-TODO(Member 6): Integrate psutil for actual host CPU/RAM and disk I/O readings.
-"""
+"""Host telemetry collection backed by psutil."""
 
 from datetime import datetime, timezone
-import random
+
+try:
+    import psutil
+except ImportError:  # pragma: no cover - exercised on minimal installs
+    psutil = None
+
 from pycoremark.models.metrics import MetricSample
 
 
 class NodeMetricsCollector:
-    """Collects CPU and memory resource consumption metrics for a specific node."""
+    """Collect real CPU, memory, disk, and network counters for a node."""
 
     def __init__(self, node_id: str) -> None:
-        """Initialize collector for a node.
-
-        Args:
-            node_id: Identifier of the monitored node.
-        """
         self.node_id = node_id
-        self._warmup_done = False
+        if psutil is not None:
+            # Prime the non-blocking CPU counter; its first result is always 0.
+            psutil.cpu_percent(interval=None)
 
     def collect(self) -> MetricSample:
-        """Collect current metric sample for this node.
+        """Return one real telemetry sample (never fabricated values)."""
+        if psutil is None:
+            return MetricSample(
+                node_id=self.node_id,
+                timestamp=datetime.now(timezone.utc),
+                cpu_percent=None,
+                memory_used_mb=None,
+                memory_total_mb=None,
+                active_tasks=0,
+                additional_metrics={"telemetry_backend": "unavailable"},
+            )
 
-        Returns:
-            MetricSample containing telemetry measurements.
-        """
-        # TODO(Member 6): Replace simulation with psutil.
-        # Saat migrasi ke psutil di Windows, panggil psutil.cpu_percent(interval=None)
-        # sekali di __init__ (warm-up) karena panggilan pertama selalu 0.0.
-        simulated_cpu = round(random.uniform(10.0, 85.0), 2)
-        simulated_mem_used = round(random.uniform(512.0, 3072.0), 2)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_io_counters()
+        network = psutil.net_io_counters()
+        additional = {"telemetry_backend": "psutil"}
+        if disk is not None:
+            additional["disk_read_bytes"] = disk.read_bytes
+            additional["disk_write_bytes"] = disk.write_bytes
+            additional["disk_read_count"] = disk.read_count
+            additional["disk_write_count"] = disk.write_count
         return MetricSample(
             node_id=self.node_id,
             timestamp=datetime.now(timezone.utc),
-            cpu_percent=simulated_cpu,
-            memory_used_mb=simulated_mem_used,
-            memory_total_mb=4096.0,
+            cpu_percent=float(psutil.cpu_percent(interval=None)),
+            memory_used_mb=memory.used / (1024 * 1024),
+            memory_total_mb=memory.total / (1024 * 1024),
             active_tasks=0,
+            network_bytes_sent=network.bytes_sent if network else 0,
+            network_bytes_received=network.bytes_recv if network else 0,
+            additional_metrics=additional,
         )

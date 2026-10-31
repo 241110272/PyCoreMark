@@ -1,7 +1,4 @@
-"""Task retry policy enforcement and backoff calculation.
-
-TODO(Member 5): Add randomized jitter to avoid thundering herd on recovery.
-"""
+"""Task retry policy enforcement with capped exponential backoff and jitter."""
 
 import random
 from typing import Optional
@@ -47,7 +44,13 @@ class RetryManager:
         base_backoff = self.policy.initial_backoff_seconds * (self.policy.backoff_multiplier ** (task.retry_count - 1))
         backoff = min(base_backoff, self.policy.max_backoff_seconds)
         
-        # DONE(Member 5): Ditambahkan randomized jitter (waktu acak 0.1 - 1.0 detik)
-        jitter = random.uniform(0.1, 1.0)
+        jitter = (
+            random.uniform(
+                self.policy.jitter_min_seconds,
+                self.policy.jitter_max_seconds,
+            )
+            if self.policy.jitter_enabled
+            else 0.0
+        )
         
         return backoff + jitter

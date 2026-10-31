@@ -2,14 +2,20 @@
 """Worker node service runtime with concurrent task execution."""
 
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timezone
 from queue import Empty, Queue
+import socket
 from threading import Event, Lock, Thread
 import time
+from uuid import uuid4
 
 from pycoremark.common.config import ClusterConfig
 from pycoremark.common.logging import get_logger
 from pycoremark.communication.broker import MessageBroker
+from pycoremark.communication.clock import LamportClock
+from pycoremark.models.event import ClusterEvent, ClusterEventType
 from pycoremark.models.node import NodeInfo, NodeResources, NodeStatus
+from pycoremark.models.task import Task, TaskStatus
 from pycoremark.worker.agents import WorkerHeartbeatAgent, WorkerMetricsAgent
 from pycoremark.worker.executor import TaskExecutor
 
@@ -39,21 +45,60 @@ class WorkerService:
         self._pool: ThreadPoolExecutor | None = None
         self._pending: set[Future] = set()
         self._pending_lock = Lock()
+        self._completed_tasks = 0
+        self._failed_tasks = 0
+        self._started_monotonic: float | None = None
+        self._event_clock = LamportClock()
 
         self._task_queue: Queue = Queue()
         self._topic = f"worker.{self.config.worker_id}.tasks"
+        self.heartbeat_agent.active_tasks_provider = self.active_task_count
+        self.metrics_agent.active_tasks_provider = self.active_task_count
+        self.metrics_agent.additional_metrics_provider = self._additional_metrics
+
+    def active_task_count(self) -> int:
+        """Number of worker tasks currently executing."""
+        with self._pending_lock:
+            return len(self._pending)
+
+    def _additional_metrics(self) -> dict:
+        with self._pending_lock:
+            completed = self._completed_tasks
+            failed = self._failed_tasks
+        return {
+            "tasks_completed": completed,
+            "tasks_failed": failed,
+            "uptime_seconds": max(0.0, time.monotonic() - self._started_monotonic)
+            if self._started_monotonic is not None else 0.0,
+        }
+
+    def _publish_event(self, event_type: ClusterEventType, payload: dict) -> None:
+        try:
+            self.broker.publish("cluster.events", ClusterEvent(
+                event_id=uuid4().hex,
+                event_type=event_type,
+                source_node_id=self.config.worker_id,
+                timestamp=datetime.now(timezone.utc),
+                payload=payload,
+                logical_clock=self._event_clock.tick(),
+            ))
+        except Exception:
+            logger.debug("Broker does not accept cluster event publication")
 
     def build_node_info(self) -> NodeInfo:
         """Build the descriptor used to register this worker."""
         return NodeInfo(
             node_id=self.config.worker_id,
-            hostname="localhost",
+            hostname=socket.gethostname(),
             port=0,
             resources=NodeResources(
                 total_cores=self.config.worker_cores,
                 available_cores=self.config.worker_cores,
                 total_memory_mb=self.config.worker_memory_mb,
                 available_memory_mb=self.config.worker_memory_mb,
+                metadata={
+                    "supported_workloads": list(self.executor.workload_registry.names())
+                },
             ),
             status=NodeStatus.READY,
         )
@@ -63,7 +108,9 @@ class WorkerService:
         if not self._is_running or self._pool is None:
             raise RuntimeError("WorkerService is not running")
 
-        future = self._pool.submit(self.executor.execute, task)
+        if not hasattr(task, "_worker_received_monotonic"):
+            task._worker_received_monotonic = time.monotonic()
+        future = self._pool.submit(self._execute_task, task)
 
         with self._pending_lock:
             self._pending.add(future)
@@ -71,12 +118,33 @@ class WorkerService:
         future.add_done_callback(self._on_task_done)
         return future
 
+    def _execute_task(self, task: Task):
+        if task.logical_clock:
+            self._event_clock.update(task.logical_clock)
+        task.status = TaskStatus.RUNNING
+        self._publish_event(
+            ClusterEventType.TASK_STARTED,
+            {"task_id": task.task_id, "experiment_id": task.experiment_id},
+        )
+        return self.executor.execute(task)
+
     def _on_task_done(self, future: Future) -> None:
         with self._pending_lock:
             self._pending.discard(future)
 
         try:
             result = future.result()
+            with self._pending_lock:
+                if result.status == TaskStatus.COMPLETED:
+                    self._completed_tasks += 1
+                else:
+                    self._failed_tasks += 1
+            self._publish_event(
+                ClusterEventType.TASK_COMPLETED
+                if result.status == TaskStatus.COMPLETED
+                else ClusterEventType.TASK_FAILED,
+                {"task_id": result.task_id, "attempt": result.attempt_number},
+            )
             logger.info(
                 "Task finished: task_id=%s status=%s",
                 getattr(result, "task_id", "unknown"),
@@ -116,7 +184,11 @@ class WorkerService:
             # Some brokers return (topic, payload) or an envelope with payload.
             if isinstance(message, tuple) and len(message) == 2:
                 message = message[1]
-            elif hasattr(message, "payload"):
+            elif (
+                hasattr(message, "message_id")
+                and hasattr(message, "topic")
+                and hasattr(message, "payload")
+            ):
                 message = message.payload
 
             return message
@@ -158,6 +230,7 @@ class WorkerService:
         )
         self._stop_event.clear()
         self._is_running = True
+        self._started_monotonic = time.monotonic()
 
         try:
             self.broker.subscribe(self._topic)

@@ -138,7 +138,16 @@ class BaseScheduler(ABC):
                     continue
                 seen.add(node.node_id)
                 queued, capacity = self._queue(node)
-                if node.status in (NodeStatus.READY, NodeStatus.BUSY) and queued < capacity:
+                resources = node.resources
+                task_fits = (
+                    task.required_cores <= resources.total_cores
+                    and task.required_memory_mb <= resources.total_memory_mb
+                )
+                if (
+                    task_fits
+                    and node.status in (NodeStatus.READY, NodeStatus.BUSY)
+                    and queued < capacity
+                ):
                     candidates.append(node)
             target = self._select_node(task, candidates)
             if target is None:

@@ -14,9 +14,9 @@ class MetricSample:
 
     node_id: str
     timestamp: datetime
-    cpu_percent: float
-    memory_used_mb: float
-    memory_total_mb: float
+    cpu_percent: Optional[float]
+    memory_used_mb: Optional[float]
+    memory_total_mb: Optional[float]
     active_tasks: int
     network_bytes_sent: int = 0
     network_bytes_received: int = 0

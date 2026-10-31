@@ -34,6 +34,28 @@ class ExperimentConfig:
     description: str = ""
     parameters: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.experiment_id, str) or not self.experiment_id.strip():
+            raise ValueError("experiment_id must be a non-empty string")
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("name must be a non-empty string")
+        for field_name in ("target_nodes", "repeat_count"):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{field_name} must be a positive integer")
+        if not isinstance(self.scheduler_type, str) or not self.scheduler_type.strip():
+            raise ValueError("scheduler_type must be a non-empty string")
+        normalized_scheduler = self.scheduler_type.strip().upper().replace("-", "_")
+        if normalized_scheduler not in {
+            "STATIC", "DYNAMIC", "RESOURCE_AWARE", "ROUND_ROBIN", "LEAST_LOADED"
+        }:
+            raise ValueError(f"Unsupported scheduler_type: {self.scheduler_type}")
+        self.scheduler_type = normalized_scheduler
+        if not isinstance(self.workload, WorkloadConfig):
+            raise TypeError("workload must be a WorkloadConfig")
+        if not isinstance(self.parameters, dict):
+            raise TypeError("parameters must be a dictionary")
+
 
 @dataclass
 class ExperimentResult:

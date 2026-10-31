@@ -1,6 +1,7 @@
-"""Abstract storage repository interfaces for persistence operations.
+"""Abstract persistence interfaces; SQLite experiment history is in ``sqlite.py``.
 
-TODO(Member 7): Add SQLite / PostgreSQL / DuckDB persistent backend drivers.
+Node, task, and time-series repository implementations can be added without
+changing the experiment-history contract.
 """
 
 from abc import ABC, abstractmethod

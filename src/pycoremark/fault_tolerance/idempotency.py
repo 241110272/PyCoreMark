@@ -4,6 +4,7 @@ TODO(Member 5): Add TTL eviction and distributed Redis/Raft backed store.
 """
 
 import time
+from threading import RLock
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
@@ -31,8 +32,11 @@ class InMemoryIdempotencyStore(IdempotencyStore):
     """Thread-safe in-memory map storing processed idempotency keys."""
 
     def __init__(self, ttl_seconds: int = 3600) -> None:
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be a positive integer")
         self._store: Dict[str, Dict[str, Any]] = {}
         self.ttl_seconds = ttl_seconds
+        self._lock = RLock()
 
     def _evict_expired(self):
         now = time.time()
@@ -42,22 +46,25 @@ class InMemoryIdempotencyStore(IdempotencyStore):
 
     def has_seen(self, key: str) -> bool:
         """Return True if key exists in store."""
-        self._evict_expired()
-        return key in self._store
+        with self._lock:
+            self._evict_expired()
+            return key in self._store
 
     def record(self, key: str, value: Any = True) -> None:
         """Save key and optional outcome value."""
-        self._evict_expired()
-        self._store[key] = {
-            'value': value,
-            'expires_at': time.time() + self.ttl_seconds
-        }
+        with self._lock:
+            self._evict_expired()
+            self._store[key] = {
+                'value': value,
+                'expires_at': time.time() + self.ttl_seconds
+            }
 
     def get_result(self, key: str) -> Optional[Any]:
         """Retrieve stored outcome."""
-        self._evict_expired()
-        entry = self._store.get(key)
-        return entry['value'] if entry else None
+        with self._lock:
+            self._evict_expired()
+            entry = self._store.get(key)
+            return entry['value'] if entry else None
 
 # DONE(Member 5): Menyiapkan kelas khusus untuk Redis Backed Store
 class RedisIdempotencyStore(IdempotencyStore):

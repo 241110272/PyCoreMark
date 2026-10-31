@@ -21,18 +21,31 @@ classifiers = [
     "Topic :: System :: Distributed Computing",
     "Topic :: System :: Benchmark",
 ]
-dependencies = []
+dependencies = [
+    "fastapi>=0.110",
+    "grpcio>=1.60",
+    "psutil>=5.9",
+    "protobuf>=4.25",
+    "redis>=5.0",
+    "streamlit>=1.32",
+    "textual>=0.80",
+    "plotly>=5.20",
+    "uvicorn>=0.27",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "fakeredis>=2.23",
 ]
 
 [project.scripts]
+pycoremark = "pycoremark.cli.main:main"
 pycoremark-coordinator = "pycoremark.cli.coordinator:main"
 pycoremark-worker = "pycoremark.cli.worker:main"
 pycoremark-dashboard = "pycoremark.cli.dashboard:main"
 pycoremark-run-dummy = "pycoremark.cli.experiment:main"
+pycoremark-web = "pycoremark.cli.web:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

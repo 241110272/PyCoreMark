@@ -30,11 +30,24 @@ class ExperimentComparisonService:
         metrics = [
             {
                 "experiment_id": result.experiment_id,
+                "status": result.status.value,
                 "throughput": result.throughput_tasks_per_sec,
                 "speedup": result.speedup,
                 "efficiency": result.efficiency,
                 "avg_latency": result.average_latency_seconds,
                 "duration": result.duration_seconds,
+                "worker_count": result.metrics_summary.get(
+                    "calculation_inputs", {}
+                ).get("workers_that_completed_tasks", 0),
+                "scheduler_type": result.metrics_summary.get(
+                    "calculation_inputs", {}
+                ).get("scheduler_type"),
+                "consistency_valid": result.metrics_summary.get(
+                    "consistency", {}
+                ).get("valid"),
+                "retry_rate": result.metrics_summary.get(
+                    "reliability", {}
+                ).get("retry_rate", 0.0),
             }
             for result in runs
         ]

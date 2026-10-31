@@ -3,6 +3,7 @@
 
 from datetime import datetime, timezone
 from threading import Event, Lock, Thread
+from typing import Callable
 
 from pycoremark.communication.broker import MessageBroker
 from pycoremark.common.logging import get_logger
@@ -72,10 +73,12 @@ class WorkerHeartbeatAgent(_PeriodicAgent):
         node_id: str,
         broker: MessageBroker,
         interval_seconds: float = 2.0,
+        active_tasks_provider: Callable[[], int] | None = None,
     ) -> None:
         super().__init__(interval_seconds)
         self.node_id = node_id
         self.broker = broker
+        self.active_tasks_provider = active_tasks_provider or (lambda: 0)
         self._seq = 0
         self._seq_lock = Lock()
 
@@ -85,11 +88,14 @@ class WorkerHeartbeatAgent(_PeriodicAgent):
             self._seq += 1
             sequence = self._seq
 
+        active_tasks = self.active_tasks_provider()
         return Heartbeat(
             node_id=self.node_id,
             sequence_number=sequence,
             timestamp=datetime.now(timezone.utc),
-            status=NodeStatus.READY,
+            status=NodeStatus.BUSY if active_tasks else NodeStatus.READY,
+            current_load=float(active_tasks),
+            active_tasks=active_tasks,
         )
 
     def send_heartbeat(self) -> None:
@@ -108,14 +114,20 @@ class WorkerMetricsAgent(_PeriodicAgent):
         collector: NodeMetricsCollector,
         broker: MessageBroker,
         interval_seconds: float = 1.0,
+        active_tasks_provider: Callable[[], int] | None = None,
+        additional_metrics_provider: Callable[[], dict] | None = None,
     ) -> None:
         super().__init__(interval_seconds)
         self.collector = collector
         self.broker = broker
+        self.active_tasks_provider = active_tasks_provider or (lambda: 0)
+        self.additional_metrics_provider = additional_metrics_provider or (lambda: {})
 
     def send_metrics(self) -> MetricSample:
         """Collect and publish one metrics sample."""
         sample = self.collector.collect()
+        sample.active_tasks = self.active_tasks_provider()
+        sample.additional_metrics.update(self.additional_metrics_provider())
         self.broker.publish("cluster.metrics", sample)
         return sample
 

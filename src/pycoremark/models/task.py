@@ -53,6 +53,11 @@ class Task:
     retry_count: int = 0
     created_at: datetime = field(default_factory=_utc_now)
     attempts: list[TaskAttempt] = field(default_factory=list)
+    queued_at: Optional[datetime] = None
+    experiment_id: Optional[str] = None
+    trace_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
+    logical_clock: int = 0
 
 
 @dataclass
@@ -66,3 +71,9 @@ class TaskResult:
     execution_time_seconds: float = 0.0
     error_message: Optional[str] = None
     completed_at: datetime = field(default_factory=_utc_now)
+    queue_wait_seconds: float = 0.0
+    attempt_number: int = 1
+    trace_id: Optional[str] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
+    started_at: Optional[datetime] = None
